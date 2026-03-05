@@ -27,20 +27,18 @@ h2 { font-size: 18px; margin-top: 0; margin-bottom: 15px; color: #2c3e50; border
 .log-combat { color: #e74c3c; font-weight: bold; }
 .log-ai { color: #bdc3c7; font-style: italic; }
 
-/* マーカーの基本設定（最も安定した配置方法） */
+/* 🌟 サイズ・マージンの調整を全廃止。純粋なコンテナにする */
 .node-marker { text-align: center; cursor: pointer; position: relative; }
-.castle-main { width: 28px !important; height: 28px !important; margin-left: -14px !important; margin-top: -14px !important; }
-.castle-sub { width: 20px !important; height: 20px !important; margin-left: -10px !important; margin-top: -10px !important; }
+.army-marker { cursor: pointer; position: relative; }
+
 .node-label { position: absolute; top: 110%; left: 50%; transform: translateX(-50%); font-size: 12px; font-weight: bold; text-shadow: 1px 1px 0 #fff, -1px -1px 0 #fff, 1px -1px 0 #fff, -1px 1px 0 #fff; white-space: nowrap; pointer-events: none; z-index: 100; }
 .troop-badge { position: absolute; top: -10px; right: -15px; background: rgba(0,0,0,0.7); color: #fff; font-size: 11px; font-weight: bold; padding: 1px 4px; border-radius: 4px; pointer-events: none; }
-
-.army-marker { font-size: 14px; line-height: 1; text-align: center; cursor: pointer; border-radius: 50%; width: 24px !important; height: 24px !important; margin-left: -12px !important; margin-top: -12px !important; border: 2px solid white; display: flex; align-items: center; justify-content: center; box-sizing: border-box; }
 
 #overlay-start { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(44, 62, 80, 0.9); z-index: 2000; display: flex; flex-direction: column; align-items: center; justify-content: center; color: white; text-align: center; }
 .rank-row { display: flex; justify-content: space-between; font-size: 13px; border-bottom: 1px solid #ecf0f1; padding: 4px 0; }
 .rank-color { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 5px; }
 
-/* 演出・UI用スタイル */
+/* --- 演出・UI用スタイル --- */
 #ui-season { font-size: 16px; margin-right: 10px; font-weight: bold; }
 .season-spring { color: #e84393; } .season-summer { color: #27ae60; }
 .season-autumn { color: #d35400; } .season-winter { color: #2980b9; }
