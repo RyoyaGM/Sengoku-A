@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>戦国統治シミュレーション - 諸大名統計・攻城戦拡張版</title>
+    <title>戦国統治シミュレーション - 遺恨＆スマートUI版</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <link rel="stylesheet" href="style.css">
 </head>
@@ -37,27 +37,12 @@
     <div id="map-container">
         <div id="map"></div>
         <div id="overlay-start">
-            <h2>戦国統治シミュレーション - 攻城戦・経済拡張版</h2>
+            <h2>戦国統治シミュレーション - ヘイト外交拡張版</h2>
             <p>1. マップデータ、2. シナリオデータの順に読み込んでください。</p>
         </div>
-        
-        <div id="stats-modal" style="display:none; position:absolute; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.85); z-index:3000; justify-content:center; align-items:center;">
-            <div style="background:#ecf0f1; width:85%; height:85%; border-radius:8px; padding:20px; display:flex; flex-direction:column; box-shadow: 0 10px 30px rgba(0,0,0,0.5);">
-                <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:3px solid #2c3e50; padding-bottom:10px;">
-                    <h2 style="margin:0; border:none; padding:0; color:#2c3e50;">📊 諸大名帳（勢力統計）</h2>
-                    <button class="action-btn" onclick="toggleStatsModal()" style="background-color:#e74c3c; font-size:14px; padding:8px 15px;">✖ 閉じる</button>
-                </div>
-                <div id="stats-table-container" style="flex:1; overflow-y:auto; margin-top:15px;">
-                    </div>
-            </div>
-        </div>
     </div>
-    
     <div id="right-panel">
-        <h2 id="panel-title" style="display:flex; justify-content:space-between; align-items:center;">
-            🏯 情報パネル
-            <button class="action-btn" style="padding: 4px 8px; font-size: 11px; background-color:#8e44ad;" onclick="toggleStatsModal()">📊 勢力統計</button>
-        </h2>
+        <h2 id="panel-title">🏯 情報パネル</h2>
         <div id="info-content"></div>
         <h2 style="margin-top: 20px;">🌍 勢力ランキング＆外交</h2>
         <div id="ranking-content" class="panel-section" style="background-color: #fdfdfd; padding: 8px;">
