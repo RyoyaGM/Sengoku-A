@@ -15,7 +15,8 @@ document.getElementById('mapLoader').addEventListener('change', function(e) {
 
 function loadMapData(mapData) {
     window.rawNodes = mapData.nodes || []; window.rawEdges = mapData.edges || [];
-    GameState.castles = {}; GameState.armies = []; GameState.alliances = new Set(); GameState.hateMatrix = {};
+    GameState.castles = {}; GameState.armies = []; GameState.alliances = {}; 
+    GameState.hateMatrix = {}; GameState.friendshipMatrix = {};
     GameState.factionsInfo = {}; GameState.tasks = [];
     buildGraph();
 
@@ -140,7 +141,6 @@ function getClosestNode(latlng) {
 
 map.on('click', (e) => { selection = { type: null, id: null }; updateUI(); drawMap(); });
 
-// 🌟 街道待機（座標への直接移動指示）を含む右クリック
 map.on('contextmenu', (e) => {
     e.originalEvent.preventDefault();
     if (selection.type !== 'army') return;
@@ -152,7 +152,6 @@ map.on('contextmenu', (e) => {
     let route = findShortestPath(getClosestNode(army.pos).id, closestNode.id);
     if (!route) route = []; 
 
-    // 城の近くをクリックした場合は城を目標にする。それ以外は「クリックした道そのもの」を目標座標とする。
     if (distToNode < 3000 && closestNode.type !== "5" && closestNode.type !== "0") {
         army.pathQueue = route; 
         army.targetNodeId = closestNode.id;
@@ -162,8 +161,8 @@ map.on('contextmenu', (e) => {
     } else {
         army.pathQueue = route;
         army.targetNodeId = null;
-        army.targetLatLng = { lat: e.latlng.lat, lng: e.latlng.lng }; // 座標を記憶
-        army.task = 'hold'; // 待機・迎撃任務
+        army.targetLatLng = { lat: e.latlng.lat, lng: e.latlng.lng };
+        army.task = 'hold';
         gameEngine.log(`目標を街道での [待機・迎撃] に設定。`);
     }
     updateUI(); drawMap();
@@ -181,7 +180,6 @@ window.handleArmyClick = function(armyId, e) {
     selection = { type: 'army', id: armyId }; updateUI(); drawMap();
 };
 
-// 🌟 task パラメータを追加
 window.deployArmy = function(castleId = null, deployAmount = null, isAI = false, task = 'attack') {
     const cId = castleId || selection.id; const castle = GameState.castles[cId]; if (!castle) return;
     const amount = deployAmount || parseInt(document.getElementById('deploy-amount').value);
@@ -260,7 +258,6 @@ function drawMap() {
             army.pathQueue.forEach(step => {
                 const pn = window.rawNodes.find(n => n.id === step.nodeId); if (pn) routeCoords.push([pn.lat, pn.lng]);
             });
-            // 目標座標（targetLatLng）がある場合は、パスの最後にその座標を繋ぐ
             if(army.targetLatLng) routeCoords.push([army.targetLatLng.lat, army.targetLatLng.lng]);
             L.polyline(routeCoords, { color: '#f1c40f', weight: 4, dashArray: '6,6', opacity: 0.9 }).addTo(edgeLayer);
         }
@@ -290,7 +287,6 @@ function drawMap() {
         if (army.troops <= 0) return;
         const isSelected = (selection.type === 'army' && selection.id === army.id);
         const factionColor = FactionMaster[army.faction]?.color || "#000";
-        const transStyle = army.task === 'transport' ? 'border-style: dashed;' : ''; // 輸送隊は破線
 
         const htmlStr = `⚔️<div class="army-troops-label" style="position:absolute; top:-15px; font-weight:bold; color:#1a252f; text-shadow:1px 1px 0 #fff,-1px -1px 0 #fff; white-space:nowrap;">${army.troops}</div>`;
         const marker = L.marker([army.pos.lat, army.pos.lng], { 
@@ -495,7 +491,7 @@ function buildStatsTable() {
 
     let html = `<table class="stats-table">
         <thead><tr>
-            <th>勢力名</th><th>外交関係 (同盟)</th><th>金 / 兵糧</th><th>拠点数 (本/支/町/港)</th><th>総石高 (秋の年貢)</th><th>総兵力</th>
+            <th>勢力名</th><th>外交関係 (和睦・同盟・盟友)</th><th>金 / 兵糧</th><th>拠点数 (本/支/町/港)</th><th>総石高 (秋の年貢)</th><th>総兵力</th>
         </tr></thead><tbody>`;
 
     sortedList.forEach(s => {
@@ -505,8 +501,11 @@ function buildStatsTable() {
         
         let allies = [];
         Object.keys(FactionMaster).forEach(other => {
-            if(s.id !== other && (GameState.alliances.has(`${s.id}-${other}`) || GameState.alliances.has(`${other}-${s.id}`))) {
-                allies.push(FactionMaster[other].name);
+            if(s.id !== other) {
+                let level = window.getAllianceLevel(s.id, other);
+                if(level === 3) allies.push(`🤝${FactionMaster[other].name}(盟友)`);
+                else if(level === 2) allies.push(`🤝${FactionMaster[other].name}(同盟)`);
+                else if(level === 1) allies.push(`🕊️${FactionMaster[other].name}(和睦)`);
             }
         });
         let allyStr = allies.length > 0 ? allies.join(', ') : "<span style='color:#bdc3c7;'>孤立</span>";
