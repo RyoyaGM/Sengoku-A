@@ -72,14 +72,12 @@ function loadScenarioData(scenarioData) {
 }
 
 // ----------------------------------------------------
-// ★追加：Spaceキーで「再生／一時停止」のショートカット
+// Spaceキーで「再生／一時停止」のショートカット
 // ----------------------------------------------------
 document.addEventListener('keydown', function(event) {
-    // 入力フォームでのスペースは無視する
     if (event.target.tagName.toLowerCase() === 'input') return;
-    
     if (event.code === 'Space') {
-        event.preventDefault(); // 画面スクロールを防ぐ
+        event.preventDefault(); 
         if (GameState.hasStarted && !document.getElementById('btnToggleTime').disabled) {
             gameEngine.toggleTime();
         }
@@ -266,7 +264,7 @@ window.executeCommand = function(cmd) {
     } else if (cmd === 'conscript') {
         if (GameState.gold < 100) { alert("軍資金が足りません"); return; }
         const maxT = getMaxTroops(castle);
-        if (castle.troops >= maxT) { alert("上限です。石高や城郭を強化して最大兵数を上げてください。"); return; }
+        if (castle.troops >= maxT) { alert("徴兵上限に達しています。石高や城郭を強化して上限を上げてください。"); return; }
         GameState.gold -= 100; castle.troops = Math.min(maxT, castle.troops + 300);
         gameEngine.log(`【徴兵】${castle.name} に兵を招集しました。`);
     }
@@ -320,7 +318,7 @@ function drawMap() {
     });
 
     GameState.armies.forEach(army => {
-        if (army.troops <= 0) return; // 0兵は描画しない
+        if (army.troops <= 0) return;
         const isSelected = (selection.type === 'army' && selection.id === army.id);
         const factionColor = FactionMaster[army.faction]?.color || "#000";
 
@@ -386,7 +384,7 @@ window.disbandArmy = function(armyId) {
 
 function updateRightPanel() {
     const panel = document.getElementById('info-content');
-    const guideHtml = `<div class="instruction"><b>【操作】</b> 左クリック: 選択 | 右クリック: 軍を移動 <br> <b>【ｼｮｰﾄｶｯﾄ】</b> Spaceキー: 時間を進める/止める</div>`;
+    const guideHtml = `<div class="instruction"><b>【操作】</b> 左クリック: 選択 | 右クリック: 軍を移動 <br> <b>【ｼｮｰﾄｶｯﾄ】</b> Spaceキー: 再生/一時停止</div>`;
 
     if (selection.type === null) { panel.innerHTML = `<p style="font-size: 12px; color: #7f8c8d;">マップ上の城や部隊をクリックしてください。</p>` + guideHtml; return; }
 
@@ -430,7 +428,7 @@ function updateRightPanel() {
                 <div class="data-row"><span>石高 (農業):</span> <b style="color:#d35400;">${castle.currentKokudaka}</b></div>
                 <div class="data-row"><span>商業 (資金):</span> <b style="color:#f39c12;">${castle.commerce}</b></div>
                 <div class="data-row"><span>防御 (城壁):</span> <b style="color:#7f8c8d;">${castle.defense}</b></div>
-                <div class="data-row"><span>守備兵力:</span> <b>${castle.troops} / MAX ${maxT}</b></div>
+                <div class="data-row"><span>守備兵力:</span> <b>${castle.troops}</b> (徴兵上限 ${maxT})</div>
             </div>
             ${GameState.playerFaction === null && castle.faction !== "independent" ? `
             <div class="panel-section"><button class="action-btn" onclick="playAsFaction('${castle.faction}')" style="background-color: #e67e22; font-weight:bold;">🎌 この大名でプレイする</button></div>
@@ -451,11 +449,9 @@ function updateRightPanel() {
     }
 }
 
-// 0兵のマーカーを確実に削除しつつ更新する
 window.updateArmyMarkers = function() {
     let needsFullRedraw = false;
     
-    // GameState.armies に存在しない（消滅した）部隊のマーカーを消去
     Object.keys(window.armyMarkers).forEach(id => {
         if (!GameState.armies.find(a => a.id === id)) {
             if(armyLayer.hasLayer(window.armyMarkers[id])) {
@@ -470,14 +466,13 @@ window.updateArmyMarkers = function() {
         if (marker) {
             marker.setLatLng([army.pos.lat, army.pos.lng]); 
         } else {
-            needsFullRedraw = true; // 新規部隊がいる場合は再描画
+            needsFullRedraw = true; 
         }
     });
     
     if (needsFullRedraw) drawMap();
 };
 
-// スライダーの数値を「秒」で表示
 window.updateSpeedDisplay = function() {
     const val = document.getElementById('speedSlider').value;
     document.getElementById('speedDisplay').innerText = (val / 1000).toFixed(2) + "秒";
