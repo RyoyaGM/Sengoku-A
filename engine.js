@@ -3,7 +3,7 @@
 const GameState = {
     isLoaded: false, hasStarted: false, isPaused: true,
     year: 1560, month: 1, day: 1, gold: 3000, castles: {}, armies: [], armyIdCounter: 1,
-    playerFaction: null // プレイヤーがどの大名かを管理
+    playerFaction: null 
 };
 
 const gameEngine = {
@@ -68,7 +68,6 @@ const gameEngine = {
 
         this.resolveBattlesInTick();
 
-        // ここで0兵の部隊を完全にリストから消去する
         GameState.armies = GameState.armies.filter(a => a.troops > 0);
 
         if (typeof window.updateArmyMarkers === 'function') window.updateArmyMarkers();
@@ -92,8 +91,8 @@ const gameEngine = {
                 const castle = GameState.castles[node.id];
                 if (castle.faction === army.faction) {
                     if(army.pathQueue.length === 0) {
-                        const maxT = getMaxTroops(castle);
-                        castle.troops = Math.min(maxT, castle.troops + army.troops);
+                        // 【修正】徴兵上限に関係なく、城に入る部隊の兵力をそのまま足す（上限撤廃）
+                        castle.troops += army.troops;
                         army.troops = 0; 
                     }
                 } else {
@@ -108,7 +107,6 @@ const gameEngine = {
                         army.troops = Math.floor(army.troops * 0.8); castle.troops = 0;
                         this.log(`<span class="log-combat">🎊 ${FactionMaster[army.faction].name}が ${castle.name} を落としました！</span>`);
                         
-                        // 自勢力に関わる合戦の場合は自動で一時停止
                         const isPlayerInvolved = GameState.playerFaction !== null && (GameState.castles[node.id].faction === GameState.playerFaction || army.faction === GameState.playerFaction);
                         if(isPlayerInvolved) {
                             if(!GameState.isPaused) this.toggleTime();
@@ -254,6 +252,7 @@ const gameEngine = {
             const traits = getFactionTraits(castle.faction);
 
             if (GameState.playerFaction !== null && castle.faction === GameState.playerFaction) {
+                // 【修正】回復も、上限を超えていない場合のみ回復するように
                 if (castle.troops < maxTroops) castle.troops = Math.min(maxTroops, castle.troops + Math.floor(maxTroops * 0.05)); 
                 monthlyIncome += Math.floor(castle.currentKokudaka * 0.01) + Math.floor(castle.commerce * 0.2);
             } else if (castle.faction !== "independent") {
