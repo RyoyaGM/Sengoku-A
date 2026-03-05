@@ -130,7 +130,7 @@ const gameEngine = {
                     addHate(castle.faction, army.faction, 2);
 
                     // 定期的に攻城ダメージを可視化（5日ごと）
-                    if (GameState.day % 5 === 0 && typeof window.showFloatingText === 'function' && map.getZoom() >= 8) {
+                    if (GameState.day % 5 === 0 && typeof window.showFloatingText === 'function') {
                         window.showFloatingText(army.pos.lat, army.pos.lng, `-${attrition*5}`, "#e74c3c");
                     }
 
@@ -175,7 +175,7 @@ const gameEngine = {
                         addHate(a1.faction, a2.faction, 10);
                         addHate(a2.faction, a1.faction, 10);
                         
-                        if(typeof window.showFloatingText === 'function' && map.getZoom() >= 8) {
+                        if(typeof window.showFloatingText === 'function') {
                             window.showFloatingText(a1.pos.lat, a1.pos.lng, "⚔️ 激突", "#e74c3c");
                         }
                         
