@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>戦国統治シミュレーション - 遺恨＆スマートUI版</title>
+    <title>戦国統治シミュレーション - 経済・攻城拡張版</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <link rel="stylesheet" href="style.css">
 </head>
@@ -22,29 +22,31 @@
     <div class="status-item">💰 資金: <span id="ui-gold" class="status-value">0</span></div>
     <div style="flex: 1;"></div>
     
-    <div class="slider-container" style="display: flex; flex-direction: column; align-items: flex-start; justify-content: center; margin-right: 15px;">
+    <div class="slider-container">
         <span style="font-size: 11px;">進行スピード:</span>
-        <div style="display: flex; align-items: center; gap: 5px;">
-            <input type="range" id="speedSlider" min="20" max="300" value="100" style="width: 80px; direction: rtl;" title="左へ動かすほど速く進みます" oninput="updateSpeedDisplay()">
-            <span id="speedDisplay" style="font-size: 12px; font-weight:bold; color: #f1c40f; width: 45px;">0.10秒</span>
-        </div>
+        <input type="range" id="speedSlider" min="20" max="300" value="100" style="width: 80px; direction: rtl;" oninput="updateSpeedDisplay()">
+        <span id="speedDisplay" style="font-size: 12px; font-weight:bold; color: #f1c40f; width: 45px;">0.10秒</span>
     </div>
 
-    <button id="btnToggleTime" class="action-btn" style="width: 160px; font-weight: bold;" onclick="gameEngine.toggleTime()" disabled title="ショートカット: Spaceキー">▶ 時間を進める</button>
+    <button id="btnToggleTime" class="action-btn" style="width: 140px; font-weight: bold;" onclick="gameEngine.toggleTime()" disabled title="ショートカット: Spaceキー">▶ 時間を進める</button>
 </div>
 
 <div id="main-container">
     <div id="map-container">
         <div id="map"></div>
         <div id="overlay-start">
-            <h2>戦国統治シミュレーション - ヘイト外交拡張版</h2>
+            <h2>戦国統治シミュレーション - 経済・攻城拡張版</h2>
             <p>1. マップデータ、2. シナリオデータの順に読み込んでください。</p>
         </div>
     </div>
     <div id="right-panel">
         <h2 id="panel-title">🏯 情報パネル</h2>
         <div id="info-content"></div>
-        <h2 style="margin-top: 20px;">🌍 勢力ランキング＆外交</h2>
+        
+        <h2 style="margin-top: 20px; align-items: center;">
+            🌍 勢力ランキング
+            <button onclick="toggleStatsModal()" style="width:auto; padding:4px 8px; font-size:11px; background:#3498db; color:white; border:none; border-radius:4px; cursor:pointer; margin:0;">📊 詳細統計</button>
+        </h2>
         <div id="ranking-content" class="panel-section" style="background-color: #fdfdfd; padding: 8px;">
             <p style="font-size: 11px; color: #7f8c8d; margin:0;">シナリオ読み込み後に表示されます</p>
         </div>
@@ -53,6 +55,15 @@
 
 <div id="log-console">
     <div class="log-entry"><span class="log-month">[システム]</span> マップデータを読み込んでください。</div>
+</div>
+
+<div id="stats-modal" class="modal-hidden">
+    <div class="modal-content">
+        <span class="close-btn" onclick="toggleStatsModal()">×</span>
+        <h2 style="border-bottom:none; margin-bottom:0;">📊 諸大名統計帳</h2>
+        <p style="font-size: 12px; color: #7f8c8d; margin-top: 0;">AIの資金や外交関係、国力を確認できます。</p>
+        <div id="stats-table-container"></div>
+    </div>
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
