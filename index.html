@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>戦国統治シミュレーション - 史実バランス・大名個性AI版</title>
+    <title>戦国統治シミュレーション - リアルタイム合戦版</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <link rel="stylesheet" href="style.css">
 </head>
@@ -21,21 +21,26 @@
     <div class="status-item">📅 日付: <span id="ui-date" class="status-value">----年 --月 --日</span></div>
     <div class="status-item">💰 資金: <span id="ui-gold" class="status-value">0</span></div>
     <div style="flex: 1;"></div>
-    
-    <div class="slider-container">
-        <span style="font-size: 11px;">進行スピード:</span>
-        <input type="range" id="speedSlider" min="20" max="300" value="100" style="width: 80px; direction: rtl;" title="左へ動かすほど速く進みます">
-    </div>
-
-    <button id="btnToggleTime" class="action-btn" style="width: 160px; font-weight: bold;" onclick="gameEngine.toggleTime()" disabled>▶ 時間を進める</button>
 </div>
 
 <div id="main-container">
-    <div id="map-container">
+    <div id="map-container" style="position: relative;">
         <div id="map"></div>
         <div id="overlay-start">
-            <h2>戦国統治シミュレーション - 史実バランス版</h2>
+            <h2>戦国統治シミュレーション - リアルタイム版</h2>
             <p>1. マップデータを読み込み、次に 2. シナリオデータを読み込んでください。</p>
+        </div>
+        
+        <div id="time-controls" style="position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); z-index: 1000; background: rgba(255,255,255,0.95); padding: 10px 25px; border-radius: 40px; box-shadow: 0 4px 15px rgba(0,0,0,0.3); display: none; gap: 20px; align-items: center; border: 2px solid #2c3e50;">
+            <div style="display: flex; flex-direction: column; align-items: center;">
+                <span style="font-size: 11px; font-weight:bold; color: #7f8c8d;">進行スピード</span>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <input type="range" id="speedSlider" min="20" max="300" value="100" style="width: 100px; direction: rtl;" title="左へ動かすほど速く進みます" oninput="updateSpeedDisplay()">
+                    <span id="speedDisplay" style="font-size: 14px; font-weight:bold; width: 55px; color: #2980b9;">0.10秒</span>
+                </div>
+            </div>
+            <button id="btnToggleTime" class="action-btn" style="width: 150px; font-weight: bold; font-size: 15px; padding: 12px; border-radius: 25px; margin: 0;" onclick="gameEngine.toggleTime()">▶ 時間を進める</button>
+            <button id="btnAutoWatch" class="action-btn" style="background-color: #9b59b6; padding: 12px 20px; border-radius: 25px; margin: 0; font-size: 13px; color: white;" onclick="toggleAutoWatch()">👀 自動観戦</button>
         </div>
     </div>
     <div id="right-panel">
