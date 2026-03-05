@@ -237,35 +237,33 @@ function drawMap() {
         }
     }
 
-    // 🌟 マーカーのサイズと中心アンカーをここで厳密に定義
     window.rawNodes.forEach(n => {
         if (n.type === "5" || n.type === "0") return; 
         const castle = GameState.castles[n.id]; if(!castle) return;
 
         const isMain = (castle.type === "1");
-        const iconW = isMain ? 28 : 20; 
-        const iconH = isMain ? 28 : 20; 
+        const sizeClass = isMain ? "castle-main" : "castle-sub";
         
         const fColor = FactionMaster[castle.faction]?.color || "#000";
         const hpPct = Math.max(0, (castle.siegeHP / castle.maxSiegeHP) * 100);
         const ringColor = hpPct > 50 ? '#2ecc71' : (hpPct > 25 ? '#f1c40f' : '#e74c3c');
         const isFlash = castle._flash ? "castle-flash" : "";
-        const shadowStyle = (selection.type === 'castle' && selection.id === n.id) ? `box-shadow: 0 0 15px 5px ${fColor};` : '';
         
+        // ユーザーのstyle.cssに合わせて、シンプルな構造に戻す
         const htmlStr = `<div class="hp-ring-container"><div class="hp-ring" style="background: conic-gradient(${ringColor} ${hpPct}%, transparent 0);"></div></div>
-                         <div style="background-color:${fColor}; width:100%; height:100%; border-radius:50%; box-sizing: border-box; ${shadowStyle}" class="${isFlash}"></div>
+                         <div style="background-color:${fColor}; width:100%; height:100%; border-radius:50%;" class="${isFlash}"></div>
                          <div class="node-label" style="color:${fColor === '#95a5a6' ? '#2c3e50' : fColor}">${castle.name}</div>
                          <div class="troop-badge">${castle.troops}</div>`;
                          
         const marker = L.marker([n.lat, n.lng], { 
             icon: L.divIcon({ 
-                className: `node-marker`, // CSS側のサイズ指定クラスを完全に削除
+                className: `node-marker ${sizeClass}`, 
                 html: htmlStr, 
-                iconSize: [iconW, iconH],      // 🌟絶対サイズ
-                iconAnchor: [iconW/2, iconH/2] // 🌟絶対中心点
+                iconSize: [0, 0] // 安定版の設定に合致させる
             }) 
         }).addTo(nodeLayer);
         
+        if (selection.type === 'castle' && selection.id === n.id) marker.getElement().style.boxShadow = `0 0 15px 5px ${fColor}`;
         marker.on('click', (e) => handleNodeLeftClick(n.id, e));
         window.castleMarkers[n.id] = marker;
         castle._flash = false; 
@@ -275,21 +273,21 @@ function drawMap() {
         if (army.troops <= 0) return;
         const isSelected = (selection.type === 'army' && selection.id === army.id);
         const factionColor = FactionMaster[army.faction]?.color || "#000";
-        const shadowStyle = isSelected ? `box-shadow: 0 0 10px 4px #f1c40f;` : '';
 
-        // 部隊アイコンのHTML構造も純粋化
-        const htmlStr = `<div style="background-color: ${factionColor}; width:100%; height:100%; border-radius:50%; display:flex; align-items:center; justify-content:center; box-sizing:border-box; border: 2px solid white; font-size:14px; ${shadowStyle}">⚔️</div>
-                         <div class="army-troops-label" style="position:absolute; top:-12px; left:50%; transform:translateX(-50%); font-weight:bold; color:#1a252f; text-shadow:1px 1px 0 #fff,-1px -1px 0 #fff; white-space:nowrap;">${army.troops}</div>`;
+        // 部隊マーカーも、安定版のstyle.css（四角形アイコン）の仕様に合致させる
+        const htmlStr = `⚔️<div class="army-troops-label" style="position:absolute; top:-15px; font-weight:bold; color:#1a252f; text-shadow:1px 1px 0 #fff,-1px -1px 0 #fff; white-space:nowrap;">${army.troops}</div>`;
         
         const marker = L.marker([army.pos.lat, army.pos.lng], { 
             icon: L.divIcon({ 
-                className: 'army-marker', 
+                className: 'army-marker' + (isSelected ? ' army-selected' : ''), 
                 html: htmlStr, 
-                iconSize: [24, 24],   // 🌟絶対サイズ
-                iconAnchor: [12, 12]  // 🌟絶対中心点
+                iconSize: [0, 0] // 安定版の設定に合致させる
             }), 
             zIndexOffset: 1000 
         }).addTo(armyLayer);
+        
+        marker.getElement().style.backgroundColor = factionColor;
+        if(isSelected) marker.getElement().style.boxShadow = '0 0 10px 4px #f1c40f';
         
         window.armyMarkers[army.id] = marker; 
         marker.on('click', (e) => handleArmyClick(army.id, e));
