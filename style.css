@@ -14,12 +14,10 @@ h2 { margin-top: 0; font-size: 15px; border-bottom: 2px solid #7f8c8d; padding-b
 input[type="number"], button { width: 100%; padding: 8px; margin-top: 5px; box-sizing: border-box; font-size: 13px; font-weight: bold;}
 button.action-btn { background-color: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; transition: 0.2s; }
 button.action-btn:hover { background-color: #2980b9; }
-button.auto-btn { background-color: #27ae60; width: 140px; }
-button.auto-btn.active { background-color: #e74c3c; }
 button:disabled { background-color: #95a5a6 !important; cursor: not-allowed; opacity: 0.7;}
 .cmd-btn { background-color: #f39c12; color: #fff; margin-top: 4px; font-size: 12px; }
 .cmd-btn:hover { background-color: #e67e22; }
-#log-console { height: 80px; background-color: #1a252f; border-top: 2px solid #bdc3c7; padding: 6px 10px; overflow-y: auto; font-family: monospace; font-size: 11px; color: #bdc3c7; line-height: 1.3; z-index: 10;}
+#log-console { height: 90px; background-color: #1a252f; border-top: 2px solid #bdc3c7; padding: 6px 10px; overflow-y: auto; font-family: monospace; font-size: 12px; color: #bdc3c7; line-height: 1.4; z-index: 10;}
 .log-entry { margin-bottom: 2px; border-bottom: 1px dashed #34495e; padding-bottom: 2px; }
 .log-month { color: #f39c12; font-weight: bold; margin-right: 5px;}
 .log-combat { color: #e74c3c; font-weight: bold; }
@@ -27,7 +25,7 @@ button:disabled { background-color: #95a5a6 !important; cursor: not-allowed; opa
 .rank-row { display: flex; align-items: center; justify-content: space-between; font-size: 12px; margin-bottom: 4px; }
 .rank-color { width: 12px; height: 12px; border-radius: 50%; display: inline-block; margin-right: 5px; }
 
-/* マーカー（絶対座標指定でズレない設定） */
+/* マーカー */
 .node-marker { border-radius: 50%; border: 2px solid #1a252f; box-sizing: border-box; cursor: pointer; text-align: center; box-shadow: 0 2px 5px rgba(0,0,0,0.5);}
 .castle-main { width: 20px !important; height: 20px !important; margin-left: -10px !important; margin-top: -10px !important; }
 .castle-sub { width: 14px !important; height: 14px !important; margin-left: -7px !important; margin-top: -7px !important; }
@@ -40,7 +38,7 @@ button:disabled { background-color: #95a5a6 !important; cursor: not-allowed; opa
 .slider-container { display: flex; align-items: center; gap: 8px; background: rgba(0,0,0,0.3); padding: 5px 10px; border-radius: 4px;}
 .instruction { font-size: 11px; background-color: #fff3cd; color: #856404; padding: 8px; border-radius: 4px; border: 1px solid #ffeeba; margin-top: 10px; line-height: 1.4; }
 
-/* 演出用スタイル */
+/* 演出 */
 #ui-season { font-size: 16px; margin-right: 10px; font-weight: bold; }
 .season-spring { color: #e84393; } .season-summer { color: #27ae60; }
 .season-autumn { color: #d35400; } .season-winter { color: #2980b9; }
@@ -51,7 +49,7 @@ button:disabled { background-color: #95a5a6 !important; cursor: not-allowed; opa
 .castle-flash { animation: captureFlash 1s ease-out; }
 @keyframes captureFlash { 0% { box-shadow: 0 0 30px 15px rgba(255, 255, 255, 1); transform: scale(1.5); } 100% { box-shadow: 0 0 0 0 rgba(255, 255, 255, 0); transform: scale(1); } }
 
-/* 詳細統計モーダル用スタイル */
+/* 詳細統計モーダル */
 #stats-modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 4000; display: flex; justify-content: center; align-items: center; }
 #stats-modal.modal-hidden { display: none; }
 .modal-content { background: #ecf0f1; color: #2c3e50; padding: 25px; border-radius: 8px; width: 85%; max-height: 85%; overflow-y: auto; position: relative; box-shadow: 0 5px 20px rgba(0,0,0,0.5); }
@@ -61,3 +59,6 @@ button:disabled { background-color: #95a5a6 !important; cursor: not-allowed; opa
 .stats-table th, .stats-table td { border: 1px solid #bdc3c7; padding: 10px; text-align: center; }
 .stats-table th { background: #34495e; color: #fff; position: sticky; top: 0; }
 .stats-table tr:nth-child(even) { background-color: #f9f9f9; }
+
+/* 工事中バッジ */
+.construction-badge { font-size: 11px; background-color: #f39c12; color: #fff; padding: 2px 6px; border-radius: 3px; font-weight: bold; margin-left: 5px; }
