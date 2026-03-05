@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>戦国統治シミュレーション - リアルタイム合戦版</title>
+    <title>戦国統治シミュレーション - 戦略・外交アップデート版</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <link rel="stylesheet" href="style.css">
 </head>
@@ -10,15 +10,15 @@
 
 <div id="top-bar">
     <div class="file-input-group">
-        <span>① マップデータ (map_data.json)</span>
+        <span>① マップデータ</span>
         <input type="file" id="mapLoader" accept=".json">
     </div>
     <div class="file-input-group">
-        <span>② シナリオデータ (scenario_1560.json)</span>
+        <span>② シナリオデータ</span>
         <input type="file" id="scenarioLoader" accept=".json" disabled>
     </div>
 
-    <div class="status-item">📅 日付: <span id="ui-date" class="status-value">----年 --月 --日</span></div>
+    <div class="status-item">📅 日付: <span id="ui-season">🌸春</span> <span id="ui-date" class="status-value">----年 --月 --日</span></div>
     <div class="status-item">💰 資金: <span id="ui-gold" class="status-value">0</span></div>
     <div style="flex: 1;"></div>
     
@@ -37,14 +37,14 @@
     <div id="map-container">
         <div id="map"></div>
         <div id="overlay-start">
-            <h2>戦国統治シミュレーション - リアルタイム版</h2>
-            <p>1. マップデータを読み込み、次に 2. シナリオデータを読み込んでください。</p>
+            <h2>戦国統治シミュレーション - 戦略拡張版</h2>
+            <p>1. マップデータ、2. シナリオデータの順に読み込んでください。</p>
         </div>
     </div>
     <div id="right-panel">
         <h2 id="panel-title">🏯 情報パネル</h2>
         <div id="info-content"></div>
-        <h2 style="margin-top: 20px;">🌍 勢力ランキング</h2>
+        <h2 style="margin-top: 20px;">🌍 勢力ランキング＆外交</h2>
         <div id="ranking-content" class="panel-section" style="background-color: #fdfdfd; padding: 8px;">
             <p style="font-size: 11px; color: #7f8c8d; margin:0;">シナリオ読み込み後に表示されます</p>
         </div>
