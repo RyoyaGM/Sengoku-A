@@ -42,7 +42,6 @@ button:disabled { background-color: #95a5a6 !important; cursor: not-allowed; opa
 #ui-season { font-size: 16px; margin-right: 10px; font-weight: bold; }
 .season-spring { color: #e84393; } .season-summer { color: #27ae60; }
 .season-autumn { color: #d35400; } .season-winter { color: #2980b9; }
-
 .floating-text-icon { pointer-events: none; }
 .floating-text { font-size: 18px; font-weight: bold; white-space: nowrap; text-shadow: 1px 1px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000; animation: floatUp 2s cubic-bezier(0.2, 0.8, 0.2, 1) forwards; }
 @keyframes floatUp { 0% { opacity: 1; transform: translateY(0) scale(0.5); } 20% { transform: translateY(-10px) scale(1.2); } 100% { opacity: 0; transform: translateY(-40px) scale(1); } }
@@ -59,6 +58,4 @@ button:disabled { background-color: #95a5a6 !important; cursor: not-allowed; opa
 .stats-table th, .stats-table td { border: 1px solid #bdc3c7; padding: 10px; text-align: center; }
 .stats-table th { background: #34495e; color: #fff; position: sticky; top: 0; }
 .stats-table tr:nth-child(even) { background-color: #f9f9f9; }
-
-/* 工事中バッジ */
 .construction-badge { font-size: 11px; background-color: #f39c12; color: #fff; padding: 2px 6px; border-radius: 3px; font-weight: bold; margin-left: 5px; }
