@@ -1,6 +1,5 @@
-// --- main.js: マップ初期化、UI操作、イベントリスナー、グラフ計算 ---
-
-window.rawNodes = []; window.rawEdges = []; window.graph = {}; window.armyMarkers = {}; 
+window.rawNodes = []; window.rawEdges = []; window.graph = {}; 
+window.armyMarkers = {}; window.castleMarkers = {};
 let selection = { type: null, id: null };
 
 const map = L.map('map', { zoomControl: false }).setView([36.0, 136.0], 5);
@@ -16,7 +15,7 @@ document.getElementById('mapLoader').addEventListener('change', function(e) {
 
 function loadMapData(mapData) {
     window.rawNodes = mapData.nodes || []; window.rawEdges = mapData.edges || [];
-    GameState.castles = {}; GameState.armies = [];
+    GameState.castles = {}; GameState.armies = []; GameState.alliances = new Set();
     buildGraph();
 
     window.rawNodes.forEach(n => {
@@ -26,6 +25,8 @@ function loadMapData(mapData) {
                 currentKokudaka: 5000, commerce: 100, defense: 100, troops: 0
             };
             castleObj.troops = getMaxTroops(castleObj);
+            castleObj.maxSiegeHP = castleObj.defense * 10;
+            castleObj.siegeHP = castleObj.maxSiegeHP;
             GameState.castles[n.id] = castleObj;
         }
     });
@@ -48,10 +49,7 @@ document.getElementById('scenarioLoader').addEventListener('change', function(e)
 
 function loadScenarioData(scenarioData) {
     document.getElementById('overlay-start').style.display = 'none';
-
-    if(scenarioData.factions) {
-        FactionMaster = { ...FactionMaster, ...scenarioData.factions };
-    }
+    if(scenarioData.factions) FactionMaster = { ...FactionMaster, ...scenarioData.factions };
 
     if(scenarioData.castles) {
         Object.values(GameState.castles).forEach(castle => {
@@ -60,20 +58,18 @@ function loadScenarioData(scenarioData) {
                 castle.faction = sData.faction || "independent";
                 castle.currentKokudaka = sData.kokudaka || 5000;
                 castle.troops = getMaxTroops(castle);
+                castle.maxSiegeHP = castle.defense * 10;
+                castle.siegeHP = castle.maxSiegeHP;
             }
         });
     }
 
     GameState.hasStarted = true;
     document.getElementById('btnToggleTime').disabled = false;
-    
     gameEngine.log("シナリオデータを適用しました。プレイする大名の城を選んでください！");
     updateUI(); drawMap();
 }
 
-// ----------------------------------------------------
-// Spaceキーで「再生／一時停止」のショートカット
-// ----------------------------------------------------
 document.addEventListener('keydown', function(event) {
     if (event.target.tagName.toLowerCase() === 'input') return;
     if (event.code === 'Space') {
@@ -85,8 +81,7 @@ document.addEventListener('keydown', function(event) {
 });
 
 function buildGraph() {
-    window.graph = {};
-    window.rawNodes.forEach(n => { window.graph[n.id] = []; });
+    window.graph = {}; window.rawNodes.forEach(n => { window.graph[n.id] = []; });
     window.rawEdges.forEach(edge => {
         const n1 = window.rawNodes.find(n => n.id === edge.from);
         const n2 = window.rawNodes.find(n => n.id === edge.to);
@@ -139,31 +134,7 @@ function getClosestNode(latlng) {
     return closest;
 }
 
-function getClosestPointOnEdges(latlng) {
-    let minPt = null; let minPixelDist = Infinity; let targetEdge = null;
-    const pt = map.latLngToLayerPoint(latlng);
-
-    window.rawEdges.forEach(edge => {
-        const n1 = window.rawNodes.find(n => n.id === edge.from);
-        const n2 = window.rawNodes.find(n => n.id === edge.to);
-        if(!n1 || !n2) return;
-        const p1 = map.latLngToLayerPoint([n1.lat, n1.lng]);
-        const p2 = map.latLngToLayerPoint([n2.lat, n2.lng]);
-        
-        const l2 = (p1.x - p2.x)**2 + (p1.y - p2.y)**2;
-        let t = 0;
-        if (l2 !== 0) { t = ((pt.x - p1.x) * (p2.x - p1.x) + (pt.y - p1.y) * (p2.y - p1.y)) / l2; t = Math.max(0, Math.min(1, t)); }
-        const proj = L.point(p1.x + t * (p2.x - p1.x), p1.y + t * (p2.y - p1.y));
-        const dist = pt.distanceTo(proj);
-        
-        if (dist < minPixelDist) { minPixelDist = dist; targetEdge = edge; minPt = map.layerPointToLatLng(proj); }
-    });
-    return { latlng: minPt, edge: targetEdge, pixelDist: minPixelDist };
-}
-
-map.on('click', (e) => {
-    selection = { type: null, id: null }; updateUI(); drawMap();
-});
+map.on('click', (e) => { selection = { type: null, id: null }; updateUI(); drawMap(); });
 
 map.on('contextmenu', (e) => {
     e.originalEvent.preventDefault();
@@ -173,42 +144,9 @@ map.on('contextmenu', (e) => {
 
     const closestCastle = getClosestNode(e.latlng);
     const distToCastle = map.distance(e.latlng, L.latLng(closestCastle.lat, closestCastle.lng));
-    
     if (closestCastle && closestCastle.type !== "5" && closestCastle.type !== "0" && distToCastle < 5000) {
         const route = findShortestPath(getClosestNode(army.pos).id, closestCastle.id);
-        if(route) {
-            army.pathQueue = route; army.targetNodeId = closestCastle.id;
-            gameEngine.log(`目標を城 [${closestCastle.name}] に設定しました。`);
-            updateUI(); drawMap(); return;
-        }
-    }
-
-    const snap = getClosestPointOnEdges(e.latlng);
-    if (snap && snap.edge) {
-        const targetEdge = snap.edge; const targetLatLng = snap.latlng;
-        const speedMod = EdgeMultipliers[targetEdge.type] || 1.0;
-        
-        const startNode = getClosestNode(army.pos);
-        const nodeA = window.rawNodes.find(n => n.id === targetEdge.from);
-        const nodeB = window.rawNodes.find(n => n.id === targetEdge.to);
-
-        let pathA = findShortestPath(startNode.id, nodeA.id);
-        let pathB = findShortestPath(startNode.id, nodeB.id);
-
-        let costA = pathA ? pathA.reduce((sum, p) => sum + (p.dist/p.speedMod), 0) + (map.distance(L.latLng(nodeA.lat, nodeA.lng), targetLatLng)/1000 / speedMod) : Infinity;
-        let costB = pathB ? pathB.reduce((sum, p) => sum + (p.dist/p.speedMod), 0) + (map.distance(L.latLng(nodeB.lat, nodeB.lng), targetLatLng)/1000 / speedMod) : Infinity;
-
-        let bestPath = null; let finalNode = null;
-        if (costA < costB && pathA) { bestPath = [...pathA]; finalNode = nodeA; }
-        else if (pathB) { bestPath = [...pathB]; finalNode = nodeB; }
-
-        if (bestPath) {
-            const finalDist = map.distance(L.latLng(finalNode.lat, finalNode.lng), targetLatLng) / 1000;
-            if (finalDist > 0.05) bestPath.push({ isVirtual: true, lat: targetLatLng.lat, lng: targetLatLng.lng, dist: finalDist, speedMod: speedMod });
-            army.pathQueue = bestPath; army.targetNodeId = null;
-            gameEngine.log(`目標を「街道の中腹」に設定しました。`);
-            updateUI(); drawMap();
-        }
+        if(route) { army.pathQueue = route; army.targetNodeId = closestCastle.id; gameEngine.log(`目標を [${closestCastle.name}] に設定。`); updateUI(); drawMap(); return; }
     }
 });
 
@@ -228,7 +166,7 @@ window.deployArmy = function(castleId = null, deployAmount = null, isAI = false)
     const cId = castleId || selection.id; const castle = GameState.castles[cId]; if (!castle) return;
     const amount = deployAmount || parseInt(document.getElementById('deploy-amount').value);
     
-    if (isNaN(amount) || amount <= 0 || amount > castle.troops) { if(!isAI) alert("出陣させる正しい兵数を入力してください。"); return; }
+    if (isNaN(amount) || amount <= 0 || amount > castle.troops) return;
     if (!isAI && GameState.gold < 50) { alert("出陣には軍資金50が必要です。"); return; }
 
     if(!isAI) GameState.gold -= 50;
@@ -241,10 +179,7 @@ window.deployArmy = function(castleId = null, deployAmount = null, isAI = false)
     };
     GameState.armies.push(army);
     
-    if(!isAI) {
-        gameEngine.log(`【出陣】${amount}の軍勢が出撃しました。マップを<b>右クリック</b>して目標を設定してください。`);
-        selection = { type: 'army', id: army.id }; updateUI(); drawMap();
-    }
+    if(!isAI) { selection = { type: 'army', id: army.id }; updateUI(); drawMap(); }
     return army;
 };
 
@@ -253,20 +188,20 @@ window.executeCommand = function(cmd) {
     const castle = GameState.castles[selection.id];
     
     if (cmd === 'agriculture') {
-        if (GameState.gold < 50) { alert("軍資金が足りません"); return; }
-        GameState.gold -= 50; castle.currentKokudaka += 2000; gameEngine.log(`【開墾】${castle.name} の石高が上がり、最大兵数が増加しました。`);
+        if (GameState.gold < 50) return;
+        GameState.gold -= 50; castle.currentKokudaka += 2000; gameEngine.log(`【開墾】${castle.name} の石高が上がりました。`);
     } else if (cmd === 'commerce') {
-        if (GameState.gold < 50) { alert("軍資金が足りません"); return; }
-        GameState.gold -= 50; castle.commerce += 50; gameEngine.log(`【投資】${castle.name} に市が立ち、資金収入と最大兵数が増加しました。`);
+        if (GameState.gold < 50) return;
+        GameState.gold -= 50; castle.commerce += 50; gameEngine.log(`【投資】${castle.name} の商業が上がりました。`);
     } else if (cmd === 'defense') {
-        if (GameState.gold < 100) { alert("軍資金が足りません"); return; }
-        GameState.gold -= 100; castle.defense += 20; gameEngine.log(`【改修】${castle.name} の城郭が強化され、防衛力と最大兵数が上がりました。`);
+        if (GameState.gold < 100) return;
+        GameState.gold -= 100; castle.defense += 20; castle.maxSiegeHP = castle.defense * 10; castle.siegeHP = castle.maxSiegeHP;
+        gameEngine.log(`【改修】${castle.name} の防衛力と耐久度が上がりました。`);
     } else if (cmd === 'conscript') {
-        if (GameState.gold < 100) { alert("軍資金が足りません"); return; }
+        if (GameState.gold < 100) return;
         const maxT = getMaxTroops(castle);
-        if (castle.troops >= maxT) { alert("徴兵上限に達しています。石高や城郭を強化して上限を上げてください。"); return; }
+        if (castle.troops >= maxT) { alert("上限です。"); return; }
         GameState.gold -= 100; castle.troops = Math.min(maxT, castle.troops + 300);
-        gameEngine.log(`【徴兵】${castle.name} に兵を招集しました。`);
     }
     updateUI(); drawMap();
 }
@@ -274,7 +209,7 @@ window.executeCommand = function(cmd) {
 function drawMap() {
     if (!GameState.isLoaded) return;
     nodeLayer.clearLayers(); edgeLayer.clearLayers(); armyLayer.clearLayers();
-    window.armyMarkers = {}; 
+    window.armyMarkers = {}; window.castleMarkers = {};
     
     window.rawEdges.forEach(edge => {
         const n1 = window.rawNodes.find(n => n.id === edge.from);
@@ -292,8 +227,7 @@ function drawMap() {
         if (army && army.pathQueue && army.pathQueue.length > 0) {
             let routeCoords = [[army.pos.lat, army.pos.lng]];
             army.pathQueue.forEach(step => {
-                if(step.isVirtual) routeCoords.push([step.lat, step.lng]);
-                else { const pn = window.rawNodes.find(n => n.id === step.nodeId); if (pn) routeCoords.push([pn.lat, pn.lng]); }
+                const pn = window.rawNodes.find(n => n.id === step.nodeId); if (pn) routeCoords.push([pn.lat, pn.lng]);
             });
             L.polyline(routeCoords, { color: '#f1c40f', weight: 4, dashArray: '6,6', opacity: 0.9 }).addTo(edgeLayer);
         }
@@ -301,20 +235,23 @@ function drawMap() {
 
     window.rawNodes.forEach(n => {
         if (n.type === "5" || n.type === "0") return; 
-        
-        const castle = GameState.castles[n.id];
-        if(!castle) return;
+        const castle = GameState.castles[n.id]; if(!castle) return;
 
         const sizeClass = castle.type === "1" ? "castle-main" : "castle-sub";
         const fColor = FactionMaster[castle.faction]?.color || "#000";
+        const hpPct = Math.max(0, (castle.siegeHP / castle.maxSiegeHP) * 100);
+        const isFlash = castle._flash ? "castle-flash" : "";
         
-        const htmlStr = `<div style="background-color:${fColor}; width:100%; height:100%; border-radius:50%;"></div>
+        const htmlStr = `<div style="background-color:${fColor}; width:100%; height:100%; border-radius:50%;" class="${isFlash}"></div>
                          <div class="node-label" style="color:${fColor === '#95a5a6' ? '#2c3e50' : fColor}">${castle.name}</div>
-                         <div class="troop-badge">${castle.troops}</div>`;
+                         <div class="troop-badge">${castle.troops}</div>
+                         <div class="siege-bar-container"><div class="siege-bar" style="width:${hpPct}%; background-color:${hpPct > 50 ? '#2ecc71' : '#e74c3c'};"></div></div>`;
         const marker = L.marker([n.lat, n.lng], { icon: L.divIcon({ className: `node-marker ${sizeClass}`, html: htmlStr, iconSize: [0,0] }) }).addTo(nodeLayer);
         
         if (selection.type === 'castle' && selection.id === n.id) marker.getElement().style.boxShadow = `0 0 15px 5px ${fColor}`;
         marker.on('click', (e) => handleNodeLeftClick(n.id, e));
+        window.castleMarkers[n.id] = marker;
+        castle._flash = false; // reset flash
     });
 
     GameState.armies.forEach(army => {
@@ -332,73 +269,78 @@ function drawMap() {
     });
 }
 
+// 演出用：文字を浮かび上がらせる
+window.showFloatingText = function(lat, lng, text, color="#e74c3c") {
+    const icon = L.divIcon({ className: 'floating-text-icon', html: `<div class="floating-text" style="color:${color};">${text}</div>`, iconSize: [0, 0] });
+    const marker = L.marker([lat, lng], {icon: icon, zIndexOffset: 2000}).addTo(map);
+    setTimeout(() => { if(map.hasLayer(marker)) map.removeLayer(marker); }, 2000);
+};
+
 function updateUI() {
     if (!GameState.isLoaded) return;
     if (GameState.hasStarted) {
         document.getElementById('ui-date').innerText = `${GameState.year}年 ${GameState.month}月 ${GameState.day}日`;
         document.getElementById('ui-gold').innerText = GameState.gold;
+        
+        // 季節の表示更新
+        let seasonStr = "🌸春", seasonClass = "season-spring";
+        if(GameState.month >= 6 && GameState.month <= 8) { seasonStr = "🍉夏"; seasonClass = "season-summer"; }
+        else if(GameState.month >= 9 && GameState.month <= 11) { seasonStr = "🍁秋"; seasonClass = "season-autumn"; }
+        else if(GameState.month === 12 || GameState.month <= 2) { seasonStr = "⛄冬"; seasonClass = "season-winter"; }
+        
+        const seasonEl = document.getElementById('ui-season');
+        seasonEl.innerText = seasonStr; seasonEl.className = seasonClass;
     }
-    updateRightPanel();
-    updateRanking();
+    updateRightPanel(); updateRanking();
 }
 
 function updateRanking() {
     const stats = {};
     Object.keys(FactionMaster).forEach(k => { if(k !== 'independent') stats[k] = { id: k, castles: 0, troops: 0 }; });
 
-    Object.values(GameState.castles).forEach(c => {
-        if (stats[c.faction]) { stats[c.faction].castles++; stats[c.faction].troops += c.troops; }
-    });
-    GameState.armies.forEach(a => {
-        if (stats[a.faction]) stats[a.faction].troops += a.troops;
-    });
+    Object.values(GameState.castles).forEach(c => { if (stats[c.faction]) { stats[c.faction].castles++; stats[c.faction].troops += c.troops; } });
+    GameState.armies.forEach(a => { if (stats[a.faction]) stats[a.faction].troops += a.troops; });
 
     const sortedList = Object.values(stats).filter(s => s.castles > 0).sort((a, b) => b.castles - a.castles);
 
     let html = '';
+    // 大包囲網の警告表示
+    if (GameState.coalitionTarget) {
+        html += `<div style="background-color:#e74c3c; color:white; padding:5px; text-align:center; font-weight:bold; font-size:12px; border-radius:3px; margin-bottom:10px;">⚠️ ${FactionMaster[GameState.coalitionTarget].name} 包囲網 形成中！</div>`;
+    }
+
     sortedList.slice(0, 8).forEach((s, idx) => {
         const fac = FactionMaster[s.id];
-        html += `<div class="rank-row">
-                    <div><b>${idx+1}.</b> <span class="rank-color" style="background-color:${fac.color};"></span><b>${fac.name}</b></div>
-                    <div>${s.castles}城 / 兵${s.troops}</div>
-                 </div>`;
+        html += `<div class="rank-row"><div><b>${idx+1}.</b> <span class="rank-color" style="background-color:${fac.color};"></span><b>${fac.name}</b></div><div>${s.castles}城 / 兵${s.troops}</div></div>`;
     });
     document.getElementById('ranking-content').innerHTML = html || '<p style="font-size: 11px;">ランキングデータがありません</p>';
 }
 
 window.playAsFaction = function(factionId) {
     GameState.playerFaction = factionId;
-    gameEngine.log(`【開始】${FactionMaster[factionId].name} を担当して天下を目指します！`);
-    updateUI(); drawMap();
+    gameEngine.log(`【開始】${FactionMaster[factionId].name} を担当して天下を目指します！`); updateUI(); drawMap();
 };
 
 window.disbandArmy = function(armyId) {
-    const armyIndex = GameState.armies.findIndex(a => a.id === armyId);
-    if (armyIndex === -1) return;
-    GameState.armies.splice(armyIndex, 1);
-    selection = { type: null, id: null };
-    gameEngine.log(`【解散】部隊を解散しました。`);
-    if (typeof window.updateArmyMarkers === 'function') window.updateArmyMarkers();
-    updateUI(); drawMap();
+    const armyIndex = GameState.armies.findIndex(a => a.id === armyId); if (armyIndex === -1) return;
+    GameState.armies.splice(armyIndex, 1); selection = { type: null, id: null };
+    gameEngine.log(`【解散】部隊を解散しました。`); updateDynamicVisuals(); updateUI();
 };
 
 function updateRightPanel() {
     const panel = document.getElementById('info-content');
-    const guideHtml = `<div class="instruction"><b>【操作】</b> 左クリック: 選択 | 右クリック: 軍を移動 <br> <b>【ｼｮｰﾄｶｯﾄ】</b> Spaceキー: 再生/一時停止</div>`;
+    const guideHtml = `<div class="instruction"><b>【操作】</b> 左クリック: 選択 | 右クリック: 軍移動 <br> <b>【ｼｮｰﾄｶｯﾄ】</b> Spaceキー: 再生/停止</div>`;
 
-    if (selection.type === null) { panel.innerHTML = `<p style="font-size: 12px; color: #7f8c8d;">マップ上の城や部隊をクリックしてください。</p>` + guideHtml; return; }
+    if (selection.type === null) { panel.innerHTML = `<p style="font-size: 12px; color: #7f8c8d;">マップ上の城や部隊をクリック</p>` + guideHtml; return; }
 
     if (selection.type === 'army') {
-        const army = GameState.armies.find(a => a.id === selection.id);
-        if (!army) return;
+        const army = GameState.armies.find(a => a.id === selection.id); if (!army) return;
         const factionData = FactionMaster[army.faction] || {name: "不明", color: "#000"};
         let destName = '待機中';
         if (army.pathQueue.length > 0) {
-            const lastStep = army.pathQueue[army.pathQueue.length - 1];
-            if(lastStep.isVirtual) destName = "街道上の地点";
-            else destName = window.rawNodes.find(n => n.id === lastStep.nodeId)?.name || '城';
+            const lastNodeId = army.pathQueue[army.pathQueue.length - 1].nodeId;
+            destName = window.rawNodes.find(n => n.id === lastNodeId)?.name || '地点';
         }
-
         panel.innerHTML = `
             <div class="panel-section" style="border-top: 4px solid ${factionData.color};">
                 <div style="font-size: 16px; font-weight: bold; margin-bottom: 5px;">軍勢ユニット</div>
@@ -407,16 +349,12 @@ function updateRightPanel() {
                 <div class="data-row"><span>目標:</span> <b style="color:#e74c3c;">${destName}</b></div>
             </div>
             ${GameState.playerFaction !== null && army.faction === GameState.playerFaction ? `
-            <div class="panel-section" style="background-color: #f9f9f9;">
-                <button class="action-btn" onclick="disbandArmy('${army.id}')" style="background-color:#95a5a6;">⛺ その場で解散</button>
-            </div>` : ''}` + guideHtml;
+            <div class="panel-section" style="background-color: #f9f9f9;"><button class="action-btn" onclick="disbandArmy('${army.id}')" style="background-color:#95a5a6;">⛺ その場で解散</button></div>` : ''}` + guideHtml;
         return;
     }
 
     if (selection.type === 'castle') {
-        const castle = GameState.castles[selection.id];
-        if (!castle) return;
-
+        const castle = GameState.castles[selection.id]; if (!castle) return;
         const factionData = FactionMaster[castle.faction] || {name: "不明", color: "#000"};
         const isPlayer = GameState.playerFaction !== null && castle.faction === GameState.playerFaction;
         const maxT = getMaxTroops(castle);
@@ -427,46 +365,51 @@ function updateRightPanel() {
                 <div class="data-row"><span>支配:</span> <b style="color:${factionData.color};">${factionData.name}</b></div>
                 <div class="data-row"><span>石高 (農業):</span> <b style="color:#d35400;">${castle.currentKokudaka}</b></div>
                 <div class="data-row"><span>商業 (資金):</span> <b style="color:#f39c12;">${castle.commerce}</b></div>
-                <div class="data-row"><span>防御 (城壁):</span> <b style="color:#7f8c8d;">${castle.defense}</b></div>
+                <div class="data-row"><span>耐久度:</span> <b style="color:#3498db;">${Math.ceil(castle.siegeHP)} / ${castle.maxSiegeHP}</b></div>
                 <div class="data-row"><span>守備兵力:</span> <b>${castle.troops}</b> (徴兵上限 ${maxT})</div>
             </div>
             ${GameState.playerFaction === null && castle.faction !== "independent" ? `
-            <div class="panel-section"><button class="action-btn" onclick="playAsFaction('${castle.faction}')" style="background-color: #e67e22; font-weight:bold;">🎌 この大名でプレイする</button></div>
-            ` : ''}
+            <div class="panel-section"><button class="action-btn" onclick="playAsFaction('${castle.faction}')" style="background-color: #e67e22; font-weight:bold;">🎌 この大名でプレイする</button></div>` : ''}
             ${isPlayer ? `
             <div class="panel-section" style="background-color: #fdf2e9;">
                 <div style="font-weight: bold; margin-bottom: 5px; font-size: 13px;">⚔️ 出陣</div>
                 <input type="number" id="deploy-amount" value="${Math.floor(castle.troops * 0.5)}" max="${castle.troops}">
-                <button class="action-btn" onclick="deployArmy()">部隊を出撃させる (金50)</button>
+                <button class="action-btn" onclick="deployArmy()">出撃 (金50)</button>
             </div>
             <div class="panel-section">
-                <div style="font-weight: bold; margin-bottom: 5px; font-size: 13px;">🛠️ 内政・軍事コマンド</div>
-                <button class="cmd-btn action-btn" onclick="executeCommand('agriculture')">🌾 開墾 (金50) - 石高UP</button>
-                <button class="cmd-btn action-btn" onclick="executeCommand('commerce')">💰 市の保護 (金50) - 商業UP</button>
-                <button class="cmd-btn action-btn" onclick="executeCommand('defense')">🏯 城郭改修 (金100) - 防御UP</button>
-                <button class="cmd-btn action-btn" onclick="executeCommand('conscript')">🗣️ 臨時徴兵 (金100) - 兵+300</button>
+                <div style="font-weight: bold; margin-bottom: 5px; font-size: 13px;">🛠️ 内政・軍事</div>
+                <button class="cmd-btn action-btn" onclick="executeCommand('agriculture')">🌾 開墾 (金50)</button>
+                <button class="cmd-btn action-btn" onclick="executeCommand('commerce')">💰 市の保護 (金50)</button>
+                <button class="cmd-btn action-btn" onclick="executeCommand('defense')">🏯 城郭改修 (金100)</button>
+                <button class="cmd-btn action-btn" onclick="executeCommand('conscript')">🗣️ 臨時徴兵 (金100)</button>
             </div>` : ''}` + guideHtml;
     }
 }
 
-window.updateArmyMarkers = function() {
+window.updateDynamicVisuals = function() {
     let needsFullRedraw = false;
-    
     Object.keys(window.armyMarkers).forEach(id => {
         if (!GameState.armies.find(a => a.id === id)) {
-            if(armyLayer.hasLayer(window.armyMarkers[id])) {
-                armyLayer.removeLayer(window.armyMarkers[id]);
-            }
+            if(armyLayer.hasLayer(window.armyMarkers[id])) armyLayer.removeLayer(window.armyMarkers[id]);
             delete window.armyMarkers[id];
         }
     });
 
     GameState.armies.forEach(army => {
         const marker = window.armyMarkers[army.id];
-        if (marker) {
-            marker.setLatLng([army.pos.lat, army.pos.lng]); 
-        } else {
-            needsFullRedraw = true; 
+        if (marker) marker.setLatLng([army.pos.lat, army.pos.lng]); 
+        else needsFullRedraw = true; 
+    });
+
+    Object.values(GameState.castles).forEach(c => {
+        const marker = window.castleMarkers[c.id];
+        if(marker) {
+            const bar = marker.getElement().querySelector('.siege-bar');
+            if(bar) {
+                let pct = Math.max(0, (c.siegeHP / c.maxSiegeHP) * 100);
+                bar.style.width = pct + "%";
+                bar.style.backgroundColor = pct > 50 ? '#2ecc71' : '#e74c3c';
+            }
         }
     });
     
