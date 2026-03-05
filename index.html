@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>戦国統治シミュレーション - 史実バランス・大名個性AI版</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div id="top-bar">
+    <div class="file-input-group">
+        <span>① マップデータ (map_data.json)</span>
+        <input type="file" id="mapLoader" accept=".json">
+    </div>
+    <div class="file-input-group">
+        <span>② シナリオデータ (scenario_1560.json)</span>
+        <input type="file" id="scenarioLoader" accept=".json" disabled>
+    </div>
+
+    <div class="status-item">📅 年月: <span id="ui-date" class="status-value">----年 --月</span></div>
+    <div class="status-item">💰 資金: <span id="ui-gold" class="status-value">0</span></div>
+    <div style="flex: 1;"></div>
+    
+    <div class="slider-container">
+        <span style="font-size: 11px;">行軍速度:</span>
+        <input type="range" id="speedSlider" min="5" max="150" value="40" oninput="updateSpeedLabel()" style="width: 80px;">
+        <span id="speedLabel" style="font-size: 12px; font-weight: bold; color: #f1c40f; width: 45px;">40 km</span>
+    </div>
+
+    <button id="btnAutoPlay" class="action-btn auto-btn" onclick="toggleAutoPlay()" disabled>▶ 自動進行(観戦)</button>
+    <button id="btnNextMonth" class="action-btn" style="width: 120px;" onclick="gameEngine.nextMonth()" disabled>⏭ 1ヶ月進める</button>
+</div>
+
+<div id="main-container">
+    <div id="map-container">
+        <div id="map"></div>
+        <div id="overlay-start">
+            <h2>戦国統治シミュレーション - 史実バランス版</h2>
+            <p>1. マップデータを読み込み、次に 2. シナリオデータを読み込んでください。</p>
+        </div>
+    </div>
+    <div id="right-panel">
+        <h2 id="panel-title">🏯 情報パネル</h2>
+        <div id="info-content"></div>
+        <h2 style="margin-top: 20px;">🌍 勢力ランキング</h2>
+        <div id="ranking-content" class="panel-section" style="background-color: #fdfdfd; padding: 8px;">
+            <p style="font-size: 11px; color: #7f8c8d; margin:0;">シナリオ読み込み後に表示されます</p>
+        </div>
+    </div>
+</div>
+
+<div id="log-console">
+    <div class="log-entry"><span class="log-month">[システム]</span> マップデータを読み込んでください。</div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="constants.js"></script>
+<script src="engine.js"></script>
+<script src="main.js"></script>
+
+</body>
+</html>
