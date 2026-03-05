@@ -1,12 +1,18 @@
-// --- engine.js: 戦略・外交・補給・攻城戦ロジック統合版 ---
+// --- engine.js: ヘイト外交・攻城戦消耗アップデート版 ---
 
 const GameState = {
     isLoaded: false, hasStarted: false, isPaused: true,
     year: 1560, month: 1, day: 1, gold: 3000, castles: {}, armies: [], armyIdCounter: 1,
-    playerFaction: null, alliances: new Set(), coalitionTarget: null
+    playerFaction: null, alliances: new Set(), hateMatrix: {}
 };
 
-// 外交判定用ヘルパー関数
+// 遺恨（ヘイト）を追加する関数
+function addHate(fromFaction, toFaction, amount) {
+    if (fromFaction === toFaction || fromFaction === 'independent' || toFaction === 'independent') return;
+    if (!GameState.hateMatrix[fromFaction]) GameState.hateMatrix[fromFaction] = {};
+    GameState.hateMatrix[fromFaction][toFaction] = (GameState.hateMatrix[fromFaction][toFaction] || 0) + amount;
+}
+
 function areAllies(f1, f2) {
     if (f1 === f2) return true;
     return GameState.alliances.has(`${f1}-${f2}`) || GameState.alliances.has(`${f2}-${f1}`);
@@ -43,14 +49,13 @@ const gameEngine = {
     tickDay: function() {
         if (GameState.day === 1) this.runAI();
 
-        // 季節による移動速度の変化（冬は雪で遅くなる）
         let isWinter = (GameState.month === 12 || GameState.month <= 2);
         const dailyMoveBase = isWinter ? 3 : 6; 
 
         GameState.armies.forEach(army => {
             if (army.troops <= 0 || army.pathQueue.length === 0) return;
 
-            // 補給線の概念：敵領土にいると毎日兵糧不足で兵が減る（1日1%減）
+            // 敵地での補給線ダメージ
             const closestNode = getClosestNode(army.pos);
             const territory = GameState.castles[closestNode.id];
             if (territory && territory.faction !== army.faction && territory.faction !== "independent" && !areAllies(army.faction, territory.faction)) {
@@ -94,7 +99,6 @@ const gameEngine = {
     },
 
     resolveBattlesInTick: function() {
-        // 攻城戦の処理（耐久度システム）
         GameState.armies.forEach(army => {
             if (army.troops <= 0) return;
             const node = getClosestNode(army.pos);
@@ -108,33 +112,44 @@ const gameEngine = {
                         castle.troops += army.troops; army.troops = 0; 
                     }
                 } else if (!areAllies(army.faction, castle.faction)) {
-                    // 同盟国でなければ攻城戦開始
-                    army.pathQueue = []; // 足止め
+                    army.pathQueue = []; 
                     
                     const attTraits = getFactionTraits(army.faction);
                     const defTraits = getFactionTraits(castle.faction);
 
-                    // 1日あたりの攻城ダメージ計算
+                    // 攻城ダメージ計算
                     const damage = Math.floor(army.troops * 0.05 * attTraits.combat_bonus * (0.8 + Math.random() * 0.4));
                     castle.siegeHP -= Math.max(1, damage);
 
-                    // 攻城側と守備兵も少しずつ減る（消耗戦）
-                    army.troops = Math.max(0, Math.floor(army.troops * 0.995));
+                    // 攻める側も痛みを伴う（消耗）
+                    const attrition = Math.max(1, Math.floor(army.troops * 0.015));
+                    army.troops = Math.max(0, army.troops - attrition);
                     castle.troops = Math.max(0, Math.floor(castle.troops * 0.99));
+                    
+                    // 遺恨の蓄積（小）
+                    addHate(castle.faction, army.faction, 2);
+
+                    // 定期的に攻城ダメージを可視化（5日ごと）
+                    if (GameState.day % 5 === 0 && typeof window.showFloatingText === 'function' && map.getZoom() >= 8) {
+                        window.showFloatingText(army.pos.lat, army.pos.lng, `-${attrition*5}`, "#e74c3c");
+                    }
 
                     if (castle.siegeHP <= 0) {
+                        // 遺恨の蓄積（大：城を奪われた恨み）
+                        addHate(castle.faction, army.faction, 500);
+
                         castle.faction = army.faction; 
-                        castle._flash = true; // 描画時にフラッシュ演出
+                        castle._flash = true; 
                         if(typeof window.showFloatingText === 'function') {
                             const nDef = window.rawNodes.find(n => n.id === castle.id);
-                            window.showFloatingText(nDef.lat, nDef.lng, "🎊 落城", FactionMaster[army.faction].color);
+                            window.showFloatingText(nDef.lat, nDef.lng, "🎊 占領", FactionMaster[army.faction].color);
                         }
                         army.troops = Math.floor(army.troops * 0.8);
                         castle.troops = 0;
-                        castle.siegeHP = castle.maxSiegeHP; // 耐久度全快で引き継ぐ
+                        castle.siegeHP = castle.maxSiegeHP; 
                         
-                        this.log(`<span class="log-combat">🎊 <b>${FactionMaster[army.faction].name}</b>が ${castle.name} を陥落させました！</span>`);
-                        drawMap(); // 色やフラッシュを即反映
+                        this.log(`<span class="log-combat">🎊 <b>${FactionMaster[army.faction].name}</b>が ${castle.name} を占領しました！</span>`);
+                        drawMap(); 
 
                         const isPlayerInvolved = GameState.playerFaction !== null && (GameState.castles[node.id].faction === GameState.playerFaction || army.faction === GameState.playerFaction);
                         if(isPlayerInvolved && !GameState.isPaused) this.toggleTime();
@@ -143,7 +158,6 @@ const gameEngine = {
             }
         });
 
-        // 野戦の処理（変更なし）
         for(let i=0; i<GameState.armies.length; i++) {
             for(let j=i+1; j<GameState.armies.length; j++) {
                 let a1 = GameState.armies[i]; let a2 = GameState.armies[j];
@@ -157,7 +171,11 @@ const gameEngine = {
                         else { a1.troops = Math.floor(a1.troops * 0.3); a2.troops = Math.floor(a2.troops * 0.8); }
                         a1.pathQueue = []; a2.pathQueue = [];
                         
-                        if(typeof window.showFloatingText === 'function') {
+                        // 激突による遺恨
+                        addHate(a1.faction, a2.faction, 10);
+                        addHate(a2.faction, a1.faction, 10);
+                        
+                        if(typeof window.showFloatingText === 'function' && map.getZoom() >= 8) {
                             window.showFloatingText(a1.pos.lat, a1.pos.lng, "⚔️ 激突", "#e74c3c");
                         }
                         
@@ -197,9 +215,11 @@ const gameEngine = {
                     if (!route) return;
 
                     const totalCost = route.reduce((sum, r) => sum + (r.dist / r.speedMod), 0);
-                    // 包囲網ターゲットへの攻撃は優先度大
-                    const priorityBonus = (targetCastle.faction === GameState.coalitionTarget) ? 5000 : (targetCastle.faction === "independent" ? 1000 : 0); 
-                    const score = (10000 / (totalCost + 1)) - targetCastle.troops + priorityBonus;
+                    // 遺恨（ヘイト）が高い相手への攻撃優先度を跳ね上げる
+                    const hateBonus = (GameState.hateMatrix[army.faction]?.[targetCastle.faction] || 0) * 10;
+                    const indepBonus = (targetCastle.faction === "independent") ? 500 : 0;
+                    const score = (10000 / (totalCost + 1)) - targetCastle.troops + hateBonus + indepBonus;
+                    
                     if (score > bestScore) { bestScore = score; bestTarget = { id: targetCastle.id, route: route }; }
                 });
 
@@ -250,8 +270,8 @@ const gameEngine = {
                 if (!route) return;
 
                 const totalCost = route.reduce((sum, r) => sum + (r.dist / r.speedMod), 0);
-                const priorityBonus = (targetCastle.faction === GameState.coalitionTarget) ? 5000 : 0; 
-                const score = (10000 / (totalCost + 1)) - targetCastle.troops + priorityBonus;
+                const hateBonus = (GameState.hateMatrix[castle.faction]?.[targetCastle.faction] || 0) * 10;
+                const score = (10000 / (totalCost + 1)) - targetCastle.troops + hateBonus;
                 
                 if (score > bestScore) { bestScore = score; bestTarget = { id: targetCastle.id, route: route }; }
             });
@@ -270,8 +290,7 @@ const gameEngine = {
     finalizeMonth: function() {
         GameState.month++; if (GameState.month > 12) { GameState.month = 1; GameState.year++; }
         
-        // --- 季節と経済の処理 ---
-        const isAutumnHarvest = (GameState.month === 9); // 9月は収穫の秋！
+        const isAutumnHarvest = (GameState.month === 9); 
         let monthlyIncome = 0;
         
         Object.values(GameState.castles).forEach(castle => {
@@ -281,19 +300,14 @@ const gameEngine = {
             if (GameState.playerFaction !== null && castle.faction === GameState.playerFaction) {
                 if (castle.troops < maxTroops) castle.troops = Math.min(maxTroops, castle.troops + Math.floor(maxTroops * 0.05)); 
                 
-                // 資金収入：通常月は商業のみ、9月は石高の特大ボーナス
-                if(isAutumnHarvest) {
-                    monthlyIncome += Math.floor(castle.currentKokudaka * 1.5) + Math.floor(castle.commerce * 0.2);
-                } else {
-                    monthlyIncome += Math.floor(castle.commerce * 0.5);
-                }
+                if(isAutumnHarvest) monthlyIncome += Math.floor(castle.currentKokudaka * 1.5) + Math.floor(castle.commerce * 0.2);
+                else monthlyIncome += Math.floor(castle.commerce * 0.5);
             } else if (castle.faction !== "independent") {
                 const recoveryBase = Math.floor(maxTroops * 0.05 + 10);
                 if (castle.troops < maxTroops) {
                     castle.troops = Math.min(maxTroops, castle.troops + Math.floor(recoveryBase * traits.recruit_bonus)); 
                 }
             }
-            // 城の耐久度も毎月少し自動回復
             if (castle.siegeHP < castle.maxSiegeHP) {
                 castle.siegeHP = Math.min(castle.maxSiegeHP, castle.siegeHP + (castle.defense * 2));
             }
@@ -304,33 +318,34 @@ const gameEngine = {
             if(isAutumnHarvest) this.log(`<span style="color:#d35400;">🌾 秋の収穫！年貢として金 ${monthlyIncome} が入りました。</span>`);
         }
 
-        // --- 外交：大包囲網ロジック ---
-        const totalCastles = Object.keys(GameState.castles).length;
-        const factionCounts = {};
-        Object.values(GameState.castles).forEach(c => {
-            if(c.faction !== 'independent') {
-                factionCounts[c.faction] = (factionCounts[c.faction] || 0) + 1;
+        // 遺恨（ヘイト）の時間経過による風化
+        for (let f1 in GameState.hateMatrix) {
+            for (let f2 in GameState.hateMatrix[f1]) {
+                if(GameState.hateMatrix[f1][f2] > 0) {
+                    GameState.hateMatrix[f1][f2] -= 10; 
+                    if(GameState.hateMatrix[f1][f2] < 0) GameState.hateMatrix[f1][f2] = 0;
+                }
             }
-        });
+        }
 
-        let biggestFaction = null; let maxOwned = 0;
-        Object.keys(factionCounts).forEach(f => {
-            if(factionCounts[f] > maxOwned) { maxOwned = factionCounts[f]; biggestFaction = f; }
-        });
-
-        // どこかの勢力が全体の15%以上の城を持ったら包囲網結成
+        // 共通の敵に対する同盟（反〇〇連合）の自動結成
         GameState.alliances.clear();
-        GameState.coalitionTarget = null;
-        
-        if (maxOwned >= Math.max(3, totalCastles * 0.15)) {
-            GameState.coalitionTarget = biggestFaction;
-            if(GameState.month === 1) this.log(`<span style="color:#c0392b; font-weight:bold;">⚠️ 各国の諸将が結託し【反 ${FactionMaster[biggestFaction].name} 包囲網】が形成されました！</span>`);
-            
-            // 包囲網ターゲット以外のAI同士はすべて同盟を結ぶ
-            const others = Object.keys(factionCounts).filter(f => f !== biggestFaction);
-            for(let i=0; i<others.length; i++) {
-                for(let j=i+1; j<others.length; j++) {
-                    GameState.alliances.add(`${others[i]}-${others[j]}`);
+        const factions = Object.keys(FactionMaster);
+        for(let i=0; i<factions.length; i++) {
+            for(let j=i+1; j<factions.length; j++) {
+                let f1 = factions[i], f2 = factions[j];
+                let commonEnemy = null;
+                for(let enemy of factions) {
+                    if (enemy === f1 || enemy === f2) continue;
+                    let h1 = GameState.hateMatrix[f1]?.[enemy] || 0;
+                    let h2 = GameState.hateMatrix[f2]?.[enemy] || 0;
+                    if (h1 > 300 && h2 > 300) { commonEnemy = enemy; break; }
+                }
+                if (commonEnemy) {
+                    GameState.alliances.add(`${f1}-${f2}`);
+                    if(GameState.month === 1 && (GameState.playerFaction === f1 || GameState.playerFaction === f2)) {
+                        this.log(`<span style="color:#2980b9;">🤝 ${FactionMaster[commonEnemy].name} の脅威に対抗するため、${FactionMaster[f1].name} と ${FactionMaster[f2].name} が密約を結びました。</span>`);
+                    }
                 }
             }
         }
