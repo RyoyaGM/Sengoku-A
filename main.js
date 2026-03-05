@@ -15,7 +15,8 @@ document.getElementById('mapLoader').addEventListener('change', function(e) {
 
 function loadMapData(mapData) {
     window.rawNodes = mapData.nodes || []; window.rawEdges = mapData.edges || [];
-    GameState.castles = {}; GameState.armies = []; GameState.alliances = new Set(); GameState.hateMatrix = {};
+    GameState.castles = {}; GameState.armies = []; GameState.alliances = new Set(); 
+    GameState.hateMatrix = {}; GameState.factionFinances = {};
     buildGraph();
 
     window.rawNodes.forEach(n => {
@@ -39,10 +40,8 @@ function loadMapData(mapData) {
 
     if (window.rawNodes.length > 0) map.setView([window.rawNodes[0].lat, window.rawNodes[0].lng], 6);
     GameState.isLoaded = true;
-    
     document.getElementById('scenarioLoader').disabled = false;
     document.getElementById('overlay-start').innerHTML = `<h2>マップ読込完了</h2><p>右上の「② シナリオデータ」を読み込んでください。</p>`;
-    gameEngine.log("マップデータを読み込みました。シナリオデータを読み込んでください。");
     drawMap();
 }
 
@@ -55,7 +54,13 @@ document.getElementById('scenarioLoader').addEventListener('change', function(e)
 
 function loadScenarioData(scenarioData) {
     document.getElementById('overlay-start').style.display = 'none';
-    if(scenarioData.factions) FactionMaster = { ...FactionMaster, ...scenarioData.factions };
+    if(scenarioData.factions) {
+        FactionMaster = { ...FactionMaster, ...scenarioData.factions };
+        // 全勢力に初期資金(財布)を付与
+        Object.keys(FactionMaster).forEach(k => {
+            if(k !== 'independent') GameState.factionFinances[k] = 3000;
+        });
+    }
 
     if(scenarioData.castles) {
         Object.values(GameState.castles).forEach(castle => {
@@ -169,9 +174,9 @@ window.deployArmy = function(castleId = null, deployAmount = null, isAI = false)
     const amount = deployAmount || parseInt(document.getElementById('deploy-amount').value);
     
     if (isNaN(amount) || amount <= 0 || amount > castle.troops) return;
-    if (!isAI && GameState.gold < 50) { alert("出陣には軍資金50が必要です。"); return; }
+    if (!isAI && GameState.factionFinances[castle.faction] < 50) { if(!isAI) alert("出陣には軍資金50が必要です。"); return; }
 
-    if(!isAI) GameState.gold -= 50;
+    GameState.factionFinances[castle.faction] -= 50;
     castle.troops -= amount;
     const nodeDef = window.rawNodes.find(n => n.id === cId);
 
@@ -188,24 +193,28 @@ window.deployArmy = function(castleId = null, deployAmount = null, isAI = false)
 window.executeCommand = function(cmd) {
     if (selection.type !== 'castle') return;
     const castle = GameState.castles[selection.id];
+    const fac = castle.faction;
     
     if (cmd === 'agriculture') {
-        if (GameState.gold < 50) return;
-        GameState.gold -= 50; castle.currentKokudaka += 2000; gameEngine.log(`【開墾】${castle.name} の石高が上がりました。`);
+        if (GameState.factionFinances[fac] < 50) return;
+        GameState.factionFinances[fac] -= 50; castle.currentKokudaka += 2000; gameEngine.log(`【開墾】${castle.name} の石高が上がりました。`);
     } else if (cmd === 'commerce') {
-        if (GameState.gold < 50) return;
-        GameState.gold -= 50; castle.commerce += 50; gameEngine.log(`【投資】${castle.name} の商業が上がりました。`);
+        if (GameState.factionFinances[fac] < 50) return;
+        GameState.factionFinances[fac] -= 50; castle.commerce += 50; gameEngine.log(`【投資】${castle.name} の商業が上がりました。`);
     } else if (cmd === 'defense') {
-        if (GameState.gold < 100) return;
-        GameState.gold -= 100; castle.defense += 20;
-        let hpMult = (castle.type==="1")? 15 : ((castle.type==="3")? 3 : ((castle.type==="4")? 5 : 10));
-        castle.maxSiegeHP = castle.defense * hpMult; castle.siegeHP = castle.maxSiegeHP;
-        gameEngine.log(`【改修】${castle.name} の防衛力と耐久度が上がりました。`);
+        const cost = (castle.type === "1") ? 200 : (castle.type === "2" ? 100 : 50);
+        if (GameState.factionFinances[fac] < cost) { alert("資金が足りません。"); return; }
+        GameState.factionFinances[fac] -= cost;
+        
+        let rec = castle.maxSiegeHP * 0.5;
+        if(castle.type === "3" || castle.type === "4") rec = castle.maxSiegeHP; // 町と港は全回復
+        castle.siegeHP = Math.min(castle.maxSiegeHP, castle.siegeHP + rec);
+        gameEngine.log(`【改修】${castle.name} の耐久度を修復しました。`);
     } else if (cmd === 'conscript') {
-        if (GameState.gold < 100) return;
+        if (GameState.factionFinances[fac] < 100) return;
         const maxT = getMaxTroops(castle);
         if (castle.troops >= maxT) { alert("上限です。"); return; }
-        GameState.gold -= 100; castle.troops = Math.min(maxT, castle.troops + 300);
+        GameState.factionFinances[fac] -= 100; castle.troops = Math.min(maxT, castle.troops + 300);
     }
     updateUI(); drawMap();
 }
@@ -242,28 +251,28 @@ function drawMap() {
         const castle = GameState.castles[n.id]; if(!castle) return;
 
         const isMain = (castle.type === "1");
-        const sizeClass = isMain ? "castle-main" : "castle-sub";
+        const iconW = isMain ? 28 : 20; 
+        const iconH = isMain ? 28 : 20; 
         
         const fColor = FactionMaster[castle.faction]?.color || "#000";
         const hpPct = Math.max(0, (castle.siegeHP / castle.maxSiegeHP) * 100);
-        const ringColor = hpPct > 50 ? '#2ecc71' : (hpPct > 25 ? '#f1c40f' : '#e74c3c');
-        const isFlash = castle._flash ? "castle-flash" : "";
+        let ringColor = hpPct > 50 ? '#2ecc71' : (hpPct > 25 ? '#f1c40f' : '#e74c3c');
+        let isCritical = hpPct === 0 ? ' hp-ring-critical' : '';
+        if (hpPct === 0) ringColor = '#c0392b'; // 白兵戦時は赤
         
-        // ユーザーのstyle.cssに合わせて、シンプルな構造に戻す
-        const htmlStr = `<div class="hp-ring-container"><div class="hp-ring" style="background: conic-gradient(${ringColor} ${hpPct}%, transparent 0);"></div></div>
-                         <div style="background-color:${fColor}; width:100%; height:100%; border-radius:50%;" class="${isFlash}"></div>
+        const isFlash = castle._flash ? "castle-flash" : "";
+        const shadowStyle = (selection.type === 'castle' && selection.id === n.id) ? `box-shadow: 0 0 15px 5px ${fColor};` : '';
+        
+        // hp-ring を描画
+        const htmlStr = `<div class="hp-ring-container${isCritical}"><div class="hp-ring" style="background: conic-gradient(${ringColor} ${Math.max(1, hpPct)}%, transparent 0);"></div></div>
+                         <div style="background-color:${fColor}; width:100%; height:100%; border-radius:50%; box-sizing: border-box; ${shadowStyle}" class="${isFlash}"></div>
                          <div class="node-label" style="color:${fColor === '#95a5a6' ? '#2c3e50' : fColor}">${castle.name}</div>
                          <div class="troop-badge">${castle.troops}</div>`;
                          
         const marker = L.marker([n.lat, n.lng], { 
-            icon: L.divIcon({ 
-                className: `node-marker ${sizeClass}`, 
-                html: htmlStr, 
-                iconSize: [0, 0] // 安定版の設定に合致させる
-            }) 
+            icon: L.divIcon({ className: `node-marker`, html: htmlStr, iconSize: [iconW, iconH], iconAnchor: [iconW/2, iconH/2] }) 
         }).addTo(nodeLayer);
         
-        if (selection.type === 'castle' && selection.id === n.id) marker.getElement().style.boxShadow = `0 0 15px 5px ${fColor}`;
         marker.on('click', (e) => handleNodeLeftClick(n.id, e));
         window.castleMarkers[n.id] = marker;
         castle._flash = false; 
@@ -273,21 +282,14 @@ function drawMap() {
         if (army.troops <= 0) return;
         const isSelected = (selection.type === 'army' && selection.id === army.id);
         const factionColor = FactionMaster[army.faction]?.color || "#000";
+        const shadowStyle = isSelected ? `box-shadow: 0 0 10px 4px #f1c40f;` : '';
 
-        // 部隊マーカーも、安定版のstyle.css（四角形アイコン）の仕様に合致させる
-        const htmlStr = `⚔️<div class="army-troops-label" style="position:absolute; top:-15px; font-weight:bold; color:#1a252f; text-shadow:1px 1px 0 #fff,-1px -1px 0 #fff; white-space:nowrap;">${army.troops}</div>`;
+        const htmlStr = `<div style="background-color: ${factionColor}; width:100%; height:100%; border-radius:50%; display:flex; align-items:center; justify-content:center; box-sizing:border-box; border: 2px solid white; font-size:14px; ${shadowStyle}">⚔️</div>
+                         <div class="army-troops-label" style="position:absolute; top:-12px; left:50%; transform:translateX(-50%); font-weight:bold; color:#1a252f; text-shadow:1px 1px 0 #fff,-1px -1px 0 #fff; white-space:nowrap;">${army.troops}</div>`;
         
         const marker = L.marker([army.pos.lat, army.pos.lng], { 
-            icon: L.divIcon({ 
-                className: 'army-marker' + (isSelected ? ' army-selected' : ''), 
-                html: htmlStr, 
-                iconSize: [0, 0] // 安定版の設定に合致させる
-            }), 
-            zIndexOffset: 1000 
+            icon: L.divIcon({ className: 'army-marker', html: htmlStr, iconSize: [24, 24], iconAnchor: [12, 12] }), zIndexOffset: 1000 
         }).addTo(armyLayer);
-        
-        marker.getElement().style.backgroundColor = factionColor;
-        if(isSelected) marker.getElement().style.boxShadow = '0 0 10px 4px #f1c40f';
         
         window.armyMarkers[army.id] = marker; 
         marker.on('click', (e) => handleArmyClick(army.id, e));
@@ -306,7 +308,8 @@ function updateUI() {
     if (!GameState.isLoaded) return;
     if (GameState.hasStarted) {
         document.getElementById('ui-date').innerText = `${GameState.year}年 ${GameState.month}月 ${GameState.day}日`;
-        document.getElementById('ui-gold').innerText = GameState.gold;
+        // 資金はプレイヤー勢力の財布から取得
+        document.getElementById('ui-gold').innerText = GameState.factionFinances[GameState.playerFaction] || 0;
         
         let seasonStr = "🌸春", seasonClass = "season-spring";
         if(GameState.month >= 6 && GameState.month <= 8) { seasonStr = "🍉夏"; seasonClass = "season-summer"; }
@@ -335,6 +338,71 @@ function updateRanking() {
     });
     document.getElementById('ranking-content').innerHTML = html || '<p style="font-size: 11px;">ランキングデータがありません</p>';
 }
+
+// 統計モーダルの切り替え
+window.toggleStatsModal = function() {
+    const modal = document.getElementById('stats-modal');
+    if (modal.style.display === 'none') {
+        renderStatsTable();
+        modal.style.display = 'flex';
+        if (!GameState.isPaused) gameEngine.toggleTime(); // 開いたときは時を止める
+    } else {
+        modal.style.display = 'none';
+    }
+};
+
+window.renderStatsTable = function() {
+    const container = document.getElementById('stats-table-container');
+    const stats = {};
+    Object.keys(FactionMaster).forEach(k => {
+        if (k !== 'independent') {
+            stats[k] = { 
+                id: k, name: FactionMaster[k].name, color: FactionMaster[k].color, 
+                gold: GameState.factionFinances[k] || 0,
+                main: 0, sub: 0, town: 0, port: 0, totalCastles: 0, koku: 0, troops: 0 
+            };
+        }
+    });
+
+    Object.values(GameState.castles).forEach(c => {
+        if (stats[c.faction]) {
+            stats[c.faction].totalCastles++;
+            stats[c.faction].koku += c.currentKokudaka;
+            stats[c.faction].troops += c.troops;
+            if(c.type === "1") stats[c.faction].main++;
+            else if(c.type === "2") stats[c.faction].sub++;
+            else if(c.type === "3") stats[c.faction].town++;
+            else if(c.type === "4") stats[c.faction].port++;
+        }
+    });
+
+    GameState.armies.forEach(a => { if (stats[a.faction]) stats[a.faction].troops += a.troops; });
+    const sortedList = Object.values(stats).filter(s => s.totalCastles > 0).sort((a, b) => b.koku - a.koku); 
+
+    let html = `<table class="stats-table">
+        <thead><tr><th>勢力</th><th>外交 (同盟・警戒)</th><th>貯蓄</th><th>拠点数 (本/支/町/港)</th><th>総石高</th><th>総兵力</th></tr></thead><tbody>`;
+
+    sortedList.forEach(s => {
+        let allies = [];
+        Array.from(GameState.alliances).forEach(pair => {
+            const [f1, f2] = pair.split('-');
+            if (f1 === s.id) allies.push(FactionMaster[f2]?.name);
+            if (f2 === s.id) allies.push(FactionMaster[f1]?.name);
+        });
+        const allyStr = allies.length > 0 ? allies.join(', ') : '-';
+
+        html += `<tr>
+            <td style="font-weight:bold;"><span class="rank-color" style="background-color:${s.color};"></span>${s.name}</td>
+            <td style="font-size:12px; color:#2980b9;">${allyStr}</td>
+            <td style="font-family:monospace; font-size:15px;">${s.gold}</td>
+            <td><b>${s.totalCastles}</b> <span style="font-size:11px;color:#7f8c8d;">(${s.main}/${s.sub}/${s.town}/${s.port})</span></td>
+            <td style="color:#d35400; font-weight:bold;">${s.koku}</td>
+            <td>${s.troops}</td>
+        </tr>`;
+    });
+    html += `</tbody></table>`;
+    container.innerHTML = html;
+};
 
 window.playAsFaction = function(factionId) {
     GameState.playerFaction = factionId;
@@ -378,6 +446,9 @@ function updateRightPanel() {
         const factionData = FactionMaster[castle.faction] || {name: "不明", color: "#000"};
         const isPlayer = GameState.playerFaction !== null && castle.faction === GameState.playerFaction;
         const maxT = getMaxTroops(castle);
+        
+        const defCost = (castle.type === "1") ? 200 : (castle.type === "2" ? 100 : 50);
+        const defRec = (castle.type === "3" || castle.type === "4") ? "全回復" : "50%回復";
 
         panel.innerHTML = `
             <div class="panel-section" style="border-top: 4px solid ${factionData.color};">
@@ -400,7 +471,7 @@ function updateRightPanel() {
                 <div style="font-weight: bold; margin-bottom: 5px; font-size: 13px;">🛠️ 内政・軍事</div>
                 <button class="cmd-btn action-btn" onclick="executeCommand('agriculture')">🌾 開墾 (金50)</button>
                 <button class="cmd-btn action-btn" onclick="executeCommand('commerce')">💰 市の保護 (金50)</button>
-                <button class="cmd-btn action-btn" onclick="executeCommand('defense')">🏯 城郭改修 (金100)</button>
+                <button class="cmd-btn action-btn" onclick="executeCommand('defense')">🏯 修復・改修 (金${defCost}/${defRec})</button>
                 <button class="cmd-btn action-btn" onclick="executeCommand('conscript')">🗣️ 臨時徴兵 (金100)</button>
             </div>` : ''}` + guideHtml;
     }
@@ -428,10 +499,13 @@ window.updateDynamicVisuals = function() {
         const marker = window.castleMarkers[c.id];
         if(marker) {
             const ring = marker.getElement().querySelector('.hp-ring');
-            if(ring) {
+            const container = marker.getElement().querySelector('.hp-ring-container');
+            if(ring && container) {
                 let pct = Math.max(0, (c.siegeHP / c.maxSiegeHP) * 100);
                 let color = pct > 50 ? '#2ecc71' : (pct > 25 ? '#f1c40f' : '#e74c3c');
-                ring.style.background = `conic-gradient(${color} ${pct}%, transparent 0)`;
+                if (pct === 0) { color = '#c0392b'; container.classList.add('hp-ring-critical'); } 
+                else { container.classList.remove('hp-ring-critical'); }
+                ring.style.background = `conic-gradient(${color} ${Math.max(1, pct)}%, transparent 0)`;
             }
             const troopLabel = marker.getElement().querySelector('.troop-badge');
             if(troopLabel) troopLabel.innerText = c.troops;
