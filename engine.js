@@ -1,8 +1,9 @@
 // --- engine.js: ゲームの状態管理と、ターン進行・AI・戦闘ロジック ---
 
 const GameState = {
-    isLoaded: false, hasStarted: false, isPaused: true,
-    year: 1560, month: 1, day: 1, gold: 3000, castles: {}, armies: [], armyIdCounter: 1
+    isLoaded: false, hasStarted: false, isPaused: true, isAutoWatch: false,
+    year: 1560, month: 1, day: 1, gold: 3000, castles: {}, armies: [], armyIdCounter: 1,
+    playerFaction: null // プレイヤーがどの大名かを管理
 };
 
 const gameEngine = {
@@ -21,7 +22,7 @@ const gameEngine = {
         if (GameState.isPaused) {
             btn.innerText = '▶ 時間を進める'; btn.classList.remove('active');
         } else {
-            btn.innerText = '⏸ 一時停止 (操作可)'; btn.classList.add('active');
+            btn.innerText = '⏸ 一時停止'; btn.classList.add('active');
             this.gameLoop();
         }
     },
@@ -38,7 +39,7 @@ const gameEngine = {
     tickDay: function() {
         if (GameState.day === 1) this.runAI();
 
-        const dailyMoveBase = 5; // 1日の基本移動距離（km）
+        const dailyMoveBase = 5; 
 
         GameState.armies.forEach(army => {
             if (army.troops <= 0 || army.pathQueue.length === 0) return;
@@ -66,6 +67,9 @@ const gameEngine = {
         });
 
         this.resolveBattlesInTick();
+
+        // ここで0兵の部隊を完全にリストから消去する
+        GameState.armies = GameState.armies.filter(a => a.troops > 0);
 
         if (typeof window.updateArmyMarkers === 'function') window.updateArmyMarkers();
         updateUI();
@@ -103,8 +107,10 @@ const gameEngine = {
                         castle.faction = army.faction; 
                         army.troops = Math.floor(army.troops * 0.8); castle.troops = 0;
                         this.log(`<span class="log-combat">🎊 ${FactionMaster[army.faction].name}が ${castle.name} を落としました！</span>`);
-                        // 戦闘終了時に一時停止してプレイヤーに状況を確認させる
-                        if(GameState.castles[node.id].faction === 'player' || army.faction === 'player') {
+                        
+                        // 自勢力に関わる合戦で、自動観戦モードでなければ一時停止
+                        const isPlayerInvolved = GameState.playerFaction !== null && (GameState.castles[node.id].faction === GameState.playerFaction || army.faction === GameState.playerFaction);
+                        if(!GameState.isAutoWatch && isPlayerInvolved) {
                             if(!GameState.isPaused) this.toggleTime();
                         }
                     } else {
@@ -131,8 +137,8 @@ const gameEngine = {
                         else { a1.troops = Math.floor(a1.troops * 0.3); a2.troops = Math.floor(a2.troops * 0.8); }
                         a1.pathQueue = []; a2.pathQueue = [];
                         
-                        // 野戦発生時に一時停止
-                        if(a1.faction === 'player' || a2.faction === 'player') {
+                        const isPlayerInvolvedWild = GameState.playerFaction !== null && (a1.faction === GameState.playerFaction || a2.faction === GameState.playerFaction);
+                        if(!GameState.isAutoWatch && isPlayerInvolvedWild) {
                             if(!GameState.isPaused) this.toggleTime();
                         }
                     }
@@ -143,7 +149,8 @@ const gameEngine = {
 
     runAI: function() {
         GameState.armies.forEach(army => {
-            if (army.faction === "player" || army.faction === "independent") return;
+            if (GameState.playerFaction !== null && army.faction === GameState.playerFaction) return;
+            if (army.faction === "independent") return;
             
             let needsNewTarget = false;
             if (army.pathQueue.length === 0) needsNewTarget = true;
@@ -168,7 +175,7 @@ const gameEngine = {
                     if (!route) return;
 
                     const totalCost = route.reduce((sum, r) => sum + (r.dist / r.speedMod), 0);
-                    const priorityBonus = (targetCastle.faction === "player") ? 3000 : (targetCastle.faction === "independent" ? 1000 : 0); 
+                    const priorityBonus = (GameState.playerFaction !== null && targetCastle.faction === GameState.playerFaction) ? 3000 : (targetCastle.faction === "independent" ? 1000 : 0); 
                     const score = (10000 / (totalCost + 1)) - targetCastle.troops + priorityBonus;
                     if (score > bestScore) { bestScore = score; bestTarget = { id: targetCastle.id, route: route }; }
                 });
@@ -192,7 +199,8 @@ const gameEngine = {
         });
 
         Object.values(GameState.castles).forEach(castle => {
-            if (castle.faction === "player" || castle.faction === "independent") return;
+            if (GameState.playerFaction !== null && castle.faction === GameState.playerFaction) return;
+            if (castle.faction === "independent") return;
             const maxT = getMaxTroops(castle);
             const traits = getFactionTraits(castle.faction); 
             const threshold = maxT * traits.wait_threshold;
@@ -220,7 +228,7 @@ const gameEngine = {
                 if (!route) return;
 
                 const totalCost = route.reduce((sum, r) => sum + (r.dist / r.speedMod), 0);
-                const priorityBonus = (targetCastle.faction === "player") ? 3000 : (targetCastle.faction === "independent" ? 1000 : 0); 
+                const priorityBonus = (GameState.playerFaction !== null && targetCastle.faction === GameState.playerFaction) ? 3000 : (targetCastle.faction === "independent" ? 1000 : 0); 
                 const score = (10000 / (totalCost + 1)) - targetCastle.troops + priorityBonus;
                 
                 if (score > bestScore) { bestScore = score; bestTarget = { id: targetCastle.id, route: route }; }
@@ -245,7 +253,7 @@ const gameEngine = {
             const maxTroops = getMaxTroops(castle);
             const traits = getFactionTraits(castle.faction);
 
-            if (castle.faction === "player") {
+            if (GameState.playerFaction !== null && castle.faction === GameState.playerFaction) {
                 if (castle.troops < maxTroops) castle.troops = Math.min(maxTroops, castle.troops + Math.floor(maxTroops * 0.05)); 
                 monthlyIncome += Math.floor(castle.currentKokudaka * 0.01) + Math.floor(castle.commerce * 0.2);
             } else if (castle.faction !== "independent") {
@@ -256,8 +264,6 @@ const gameEngine = {
             }
         });
         GameState.gold += monthlyIncome;
-
-        GameState.armies = GameState.armies.filter(a => a.troops > 0);
         
         updateUI(); drawMap();
     }
