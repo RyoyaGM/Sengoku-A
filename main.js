@@ -65,13 +65,26 @@ function loadScenarioData(scenarioData) {
     }
 
     GameState.hasStarted = true;
+    document.getElementById('btnToggleTime').disabled = false;
     
-    // コントロールパネルを表示
-    document.getElementById('time-controls').style.display = 'flex';
-    
-    gameEngine.log("シナリオデータを適用しました。プレイする大名の城を選んでください！（または観戦）");
+    gameEngine.log("シナリオデータを適用しました。プレイする大名の城を選んでください！");
     updateUI(); drawMap();
 }
+
+// ----------------------------------------------------
+// ★追加：Spaceキーで「再生／一時停止」のショートカット
+// ----------------------------------------------------
+document.addEventListener('keydown', function(event) {
+    // 入力フォームでのスペースは無視する
+    if (event.target.tagName.toLowerCase() === 'input') return;
+    
+    if (event.code === 'Space') {
+        event.preventDefault(); // 画面スクロールを防ぐ
+        if (GameState.hasStarted && !document.getElementById('btnToggleTime').disabled) {
+            gameEngine.toggleTime();
+        }
+    }
+});
 
 function buildGraph() {
     window.graph = {};
@@ -355,13 +368,8 @@ function updateRanking() {
     document.getElementById('ranking-content').innerHTML = html || '<p style="font-size: 11px;">ランキングデータがありません</p>';
 }
 
-// 旗揚げの代わりに「既存の勢力（大名）を担当する」機能
 window.playAsFaction = function(factionId) {
     GameState.playerFaction = factionId;
-    GameState.isAutoWatch = false; 
-    document.getElementById('btnAutoWatch').innerText = '👀 自動観戦';
-    document.getElementById('btnAutoWatch').style.backgroundColor = '#9b59b6';
-    
     gameEngine.log(`【開始】${FactionMaster[factionId].name} を担当して天下を目指します！`);
     updateUI(); drawMap();
 };
@@ -378,7 +386,7 @@ window.disbandArmy = function(armyId) {
 
 function updateRightPanel() {
     const panel = document.getElementById('info-content');
-    const guideHtml = `<div class="instruction"><b>【操作】</b> 左クリック: 選択 | 右クリック: 軍を移動</div>`;
+    const guideHtml = `<div class="instruction"><b>【操作】</b> 左クリック: 選択 | 右クリック: 軍を移動 <br> <b>【ｼｮｰﾄｶｯﾄ】</b> Spaceキー: 時間を進める/止める</div>`;
 
     if (selection.type === null) { panel.innerHTML = `<p style="font-size: 12px; color: #7f8c8d;">マップ上の城や部隊をクリックしてください。</p>` + guideHtml; return; }
 
@@ -473,18 +481,4 @@ window.updateArmyMarkers = function() {
 window.updateSpeedDisplay = function() {
     const val = document.getElementById('speedSlider').value;
     document.getElementById('speedDisplay').innerText = (val / 1000).toFixed(2) + "秒";
-};
-
-// 自動観戦の切り替え
-window.toggleAutoWatch = function() {
-    GameState.isAutoWatch = !GameState.isAutoWatch;
-    const btn = document.getElementById('btnAutoWatch');
-    if (GameState.isAutoWatch) {
-        btn.style.backgroundColor = '#8e44ad';
-        btn.innerText = '👀 観戦中(合戦で止まらない)';
-        if (GameState.isPaused) gameEngine.toggleTime(); // 停止中なら動かす
-    } else {
-        btn.style.backgroundColor = '#9b59b6';
-        btn.innerText = '👀 自動観戦';
-    }
 };
