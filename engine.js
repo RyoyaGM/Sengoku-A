@@ -1,4 +1,4 @@
-// --- engine.js: 経済スケーリング・兵糧・工期システム 実装版 ---
+// --- engine.js: 合流・輸送・街道待機・完全整数化 実装版 ---
 
 const GameState = {
     isLoaded: false, hasStarted: false, isPaused: true,
@@ -52,7 +52,7 @@ const gameEngine = {
         let isWinter = (GameState.month === 12 || GameState.month <= 2);
         const dailyMoveBase = isWinter ? 3 : 6; 
 
-        // 🌟 兵糧消費（軍勢維持費）
+        // 🌟 兵糧消費（軍勢維持費）- 完全整数化
         Object.keys(GameState.factionsInfo).forEach(f => {
             let info = GameState.factionsInfo[f];
             let dailyFoodCost = 0;
@@ -66,27 +66,22 @@ const gameEngine = {
             
             info.food -= Math.floor(dailyFoodCost);
             
-            // 飢餓による脱走ペナルティ
             if (info.food <= 0) {
                 info.food = 0;
-                Object.values(GameState.castles).forEach(c => {
-                    if (c.faction === f) c.troops = Math.max(0, Math.floor(c.troops * 0.98));
-                });
-                GameState.armies.forEach(a => {
-                    if (a.faction === f) a.troops = Math.max(0, Math.floor(a.troops * 0.98));
-                });
+                Object.values(GameState.castles).forEach(c => { if (c.faction === f) c.troops = Math.max(0, Math.floor(c.troops * 0.98)); });
+                GameState.armies.forEach(a => { if (a.faction === f) a.troops = Math.max(0, Math.floor(a.troops * 0.98)); });
                 if (GameState.day === 1 && f === GameState.playerFaction) this.log(`<span style="color:#e74c3c;">⚠️ 兵糧が尽き、飢餓により兵士が脱走しています！</span>`);
             }
         });
 
-        // 🌟 工期タスクの進行
+        // 工期タスクの進行
         for (let i = GameState.tasks.length - 1; i >= 0; i--) {
             let t = GameState.tasks[i];
             t.daysLeft--;
             if (t.daysLeft <= 0) {
                 let info = GameState.factionsInfo[t.faction];
                 if (info && info.gold >= t.finishCost) {
-                    info.gold -= t.finishCost;
+                    info.gold -= t.finishCost; // 既にMath.floorされている
                     const c = GameState.castles[t.castleId];
                     if (c && c.faction === t.faction) { 
                         if (t.type === 'agriculture') {
@@ -112,21 +107,35 @@ const gameEngine = {
             }
         }
 
+        // 🌟 移動ロジック（街道の任意の座標への移動・待機対応）
         GameState.armies.forEach(army => {
-            if (army.troops <= 0 || army.pathQueue.length === 0) return;
+            if (army.troops <= 0) return;
+
             let nextStep = army.pathQueue[0];
-            let targetLat = window.rawNodes.find(n => n.id === nextStep.nodeId).lat;
-            let targetLng = window.rawNodes.find(n => n.id === nextStep.nodeId).lng;
+            let targetLat, targetLng, speedMod = 1.0;
+
+            if (nextStep) {
+                let nInfo = window.rawNodes.find(n => n.id === nextStep.nodeId);
+                targetLat = nInfo.lat; targetLng = nInfo.lng;
+                speedMod = nextStep.speedMod;
+            } else if (army.targetLatLng) {
+                targetLat = army.targetLatLng.lat; targetLng = army.targetLatLng.lng;
+            } else {
+                return; // 完全に到着し、留まっている
+            }
 
             let distToNext = map.distance(L.latLng(army.pos.lat, army.pos.lng), L.latLng(targetLat, targetLng)) / 1000;
             if(distToNext < 0.1) distToNext = 0;
 
-            let dailyMove = dailyMoveBase * nextStep.speedMod;
+            let dailyMove = dailyMoveBase * speedMod;
+
             if (dailyMove >= distToNext) {
                 army.pos = { lat: targetLat, lng: targetLng };
-                army.pathQueue.shift();
-                if (window.rawNodes.find(n => n.id === nextStep.nodeId).type !== "5" && window.rawNodes.find(n => n.id === nextStep.nodeId).type !== "0") {
-                    army.pathQueue = []; 
+                if (army.pathQueue.length > 0) {
+                    army.pathQueue.shift();
+                } else if (army.targetLatLng) {
+                    army.targetLatLng = null; // 座標に到着し、待機状態へ
+                    army.task = 'hold';
                 }
             } else {
                 let ratio = distToNext === 0 ? 0 : dailyMove / distToNext;
@@ -134,6 +143,26 @@ const gameEngine = {
                 army.pos.lng += (targetLng - army.pos.lng) * ratio;
             }
         });
+
+        // 🌟 部隊の合流（Merging）ロジック
+        for (let i = 0; i < GameState.armies.length; i++) {
+            for (let j = i + 1; j < GameState.armies.length; j++) {
+                let a1 = GameState.armies[i]; let a2 = GameState.armies[j];
+                if (a1.troops <= 0 || a2.troops <= 0) continue;
+                
+                // 同一勢力 ＆ 輸送任務ではない ＆ 距離0.5km以内なら合流
+                if (a1.faction === a2.faction && a1.task !== 'transport' && a2.task !== 'transport') {
+                    let dist = map.distance(L.latLng(a1.pos.lat, a1.pos.lng), L.latLng(a2.pos.lat, a2.pos.lng));
+                    if (dist < 500) { 
+                        if (a1.troops >= a2.troops) {
+                            a1.troops += a2.troops; a2.troops = 0;
+                        } else {
+                            a2.troops += a1.troops; a1.troops = 0;
+                        }
+                    }
+                }
+            }
+        }
 
         this.resolveBattlesInTick();
         GameState.armies = GameState.armies.filter(a => a.troops > 0);
@@ -154,17 +183,24 @@ const gameEngine = {
             const dist = map.distance(L.latLng(army.pos.lat, army.pos.lng), L.latLng(node.lat, node.lng));
             if (dist < 200) { 
                 const castle = GameState.castles[node.id];
+
+                // 🌟 味方の城に到着した場合の処理（輸送隊は入城して消滅、防衛隊も入城）
                 if (castle.faction === army.faction) {
-                    if(army.pathQueue.length === 0) { castle.troops += army.troops; army.troops = 0; }
+                    if (army.task === 'transport' || (army.pathQueue.length === 0 && !army.targetLatLng)) {
+                        castle.troops += army.troops; army.troops = 0; 
+                        if(army.task === 'transport' && castle.faction === GameState.playerFaction) {
+                            this.log(`<span style="color:#3498db;">🚚 輸送隊が ${castle.name} に到着し、守備隊に合流しました。</span>`);
+                        }
+                    }
                 } else if (!areAllies(army.faction, castle.faction)) {
-                    army.pathQueue = []; 
+                    army.pathQueue = []; army.targetLatLng = null; // 攻城開始
                     
                     if (castle.troops > army.troops && castle.loyalty >= 40) {
                         const sortieTroops = Math.floor(castle.troops * 0.8);
                         castle.troops -= sortieTroops;
                         const defArmy = {
                             id: "army_" + (GameState.armyIdCounter++), faction: castle.faction, troops: sortieTroops,
-                            pos: { lat: node.lat, lng: node.lng }, pathQueue: [], targetNodeId: null
+                            pos: { lat: node.lat, lng: node.lng }, pathQueue: [], targetNodeId: null, targetLatLng: null, task: 'attack'
                         };
                         GameState.armies.push(defArmy);
                         this.log(`<span class="log-combat">🐎 <b>${castle.name}</b> の守備隊が城を打って出ました！野戦に持ち込みます！</span>`);
@@ -174,8 +210,6 @@ const gameEngine = {
 
                     const attTraits = getFactionTraits(army.faction);
                     const defTraits = getFactionTraits(castle.faction);
-
-                    // 工事中は防御力低下
                     let isUnderConstruction = GameState.tasks.some(t => t.castleId === castle.id);
                     let defVal = isUnderConstruction ? castle.defense * 0.8 : castle.defense;
 
@@ -219,8 +253,6 @@ const gameEngine = {
                                 army.troops = Math.floor(army.troops * 0.8);
                                 castle.siegeHP = Math.floor(castle.maxSiegeHP * 0.25); 
                                 castle.loyalty = 50; 
-                                
-                                // 建築タスクキャンセル
                                 GameState.tasks = GameState.tasks.filter(t => t.castleId !== castle.id);
 
                                 this.log(`<span class="log-combat">🎊 <b>${FactionMaster[army.faction].name}</b>が ${castle.name} を占領しました！</span>`);
@@ -235,6 +267,7 @@ const gameEngine = {
             }
         });
 
+        // 野戦（衝突）
         for(let i=0; i<GameState.armies.length; i++) {
             for(let j=i+1; j<GameState.armies.length; j++) {
                 let a1 = GameState.armies[i]; let a2 = GameState.armies[j];
@@ -246,7 +279,10 @@ const gameEngine = {
                         
                         if (att > def) { a2.troops = Math.floor(a2.troops * 0.3); a1.troops = Math.floor(a1.troops * 0.8); } 
                         else { a1.troops = Math.floor(a1.troops * 0.3); a2.troops = Math.floor(a2.troops * 0.8); }
+                        
+                        // 迎撃部隊などは戦闘後にその場で停止する
                         a1.pathQueue = []; a2.pathQueue = [];
+                        a1.targetLatLng = null; a2.targetLatLng = null;
                         
                         addHate(a1.faction, a2.faction, 10); addHate(a2.faction, a1.faction, 10);
                         if(typeof window.showFloatingText === 'function') window.showFloatingText(a1.pos.lat, a1.pos.lng, "⚔️ 激突", "#e74c3c");
@@ -259,73 +295,85 @@ const gameEngine = {
     runAI: function() {
         let pIdx = GameState.priceIndex;
 
+        // 前線判定（事前計算）
+        let isFrontline = {};
+        Object.values(GameState.castles).forEach(c => {
+            isFrontline[c.id] = false;
+            const cNode = window.rawNodes.find(n => n.id === c.id);
+            Object.values(GameState.castles).forEach(e => {
+                if (e.faction !== c.faction && e.faction !== 'independent') {
+                    const eNode = window.rawNodes.find(n => n.id === e.id);
+                    if (map.distance(L.latLng(cNode.lat, cNode.lng), L.latLng(eNode.lat, eNode.lng)) < 40000) { // 40km以内に敵がいる
+                        isFrontline[c.id] = true;
+                    }
+                }
+            });
+        });
+
         Object.values(GameState.castles).forEach(castle => {
             if(castle.faction === 'independent') return;
             const maxT = getMaxTroops(castle);
-            const deployableTroops = Math.floor(castle.troops * 0.4);
+            const deployableTroops = Math.floor(castle.troops * 0.7); // 🌟 70%まで出撃許可
             let fInfo = GameState.factionsInfo[castle.faction];
             if(!fInfo) return;
 
-            // 🌟 1. 援軍ロジック
-            let needReinforce = null;
-            Object.values(GameState.castles).forEach(allyC => {
-                if(allyC.faction === castle.faction && allyC.id !== castle.id) {
-                    let isAttacked = GameState.armies.some(a => a.faction !== castle.faction && a.targetNodeId === allyC.id);
-                    if(isAttacked && allyC.troops < maxT * 0.5) needReinforce = allyC;
-                }
-            });
-
-            if (needReinforce && deployableTroops > 500) {
-                const route = findShortestPath(castle.id, needReinforce.id);
-                if (route) {
-                    const army = window.deployArmy(castle.id, deployableTroops, true);
-                    if (army) {
-                        army.pathQueue = route; army.targetNodeId = needReinforce.id;
-                        this.log(`<span class="log-ai">🐎 ${FactionMaster[castle.faction].name} が ${needReinforce.name} 救援のため出陣！</span>`);
+            // 🌟 1. 輸送ロジック（後方から前線へ兵を送る）
+            if (!isFrontline[castle.id] && castle.troops > 1500) {
+                let bestDest = null; let minDist = Infinity;
+                const cNode = window.rawNodes.find(n => n.id === castle.id);
+                Object.values(GameState.castles).forEach(a => {
+                    if (a.faction === castle.faction && isFrontline[a.id]) {
+                        const aNode = window.rawNodes.find(n => n.id === a.id);
+                        const dist = map.distance(L.latLng(cNode.lat, cNode.lng), L.latLng(aNode.lat, aNode.lng));
+                        if (dist < minDist) { minDist = dist; bestDest = a; }
                     }
-                    return; 
+                });
+                if (bestDest) {
+                    const route = findShortestPath(castle.id, bestDest.id);
+                    if (route) {
+                        const tArmy = window.deployArmy(castle.id, 1000, true, 'transport');
+                        if (tArmy) {
+                            tArmy.pathQueue = route; tArmy.targetNodeId = bestDest.id;
+                            this.log(`<span class="log-ai">🚚 ${FactionMaster[castle.faction].name} が前線の ${bestDest.name} へ輸送隊を派遣！</span>`);
+                        }
+                    }
                 }
             }
 
-            // 🌟 2. AIの内政（工期・スケーリング考慮）
+            // 🌟 2. 内政ロジック
             if(GameState.playerFaction === null || castle.faction !== GameState.playerFaction) {
                 if (!GameState.tasks.some(t => t.castleId === castle.id)) {
-                    let repCost = Math.floor(25 * pIdx);
-                    let defCost = Math.floor(100 * pIdx);
-                    let agrCost = Math.floor(25 * pIdx);
+                    let repCost = Math.floor(25 * pIdx); let defCost = Math.floor(100 * pIdx); let agrCost = Math.floor(25 * pIdx);
 
                     if (castle.siegeHP < castle.maxSiegeHP && fInfo.gold >= repCost * 2 + 50) {
                         fInfo.gold -= repCost;
                         GameState.tasks.push({ type: 'repair', castleId: castle.id, faction: castle.faction, daysLeft: 15, finishCost: repCost });
                     }
-                    else if (castle.troops < maxT * 0.5 && fInfo.gold >= 100 * pIdx && fInfo.food >= 50 * pIdx && castle.loyalty >= 50) {
-                        fInfo.gold -= 100 * pIdx; fInfo.food -= 50 * pIdx;
+                    else if (castle.troops < maxT * 0.5 && fInfo.gold >= Math.floor(100 * pIdx) && fInfo.food >= Math.floor(50 * pIdx) && castle.loyalty >= 50) {
+                        fInfo.gold -= Math.floor(100 * pIdx); fInfo.food -= Math.floor(50 * pIdx);
                         castle.troops = Math.min(maxT, castle.troops + 300);
                         castle.loyalty -= 10;
                     }
-                    else if (fInfo.gold >= agrCost * 2 + 100 * pIdx) {
+                    else if (fInfo.gold >= agrCost * 2 + Math.floor(100 * pIdx)) {
                         fInfo.gold -= agrCost;
                         GameState.tasks.push({ type: 'agriculture', castleId: castle.id, faction: castle.faction, daysLeft: 30, finishCost: agrCost });
                     }
-                    else if (fInfo.gold >= defCost * 2 + 500 * pIdx) {
+                    else if (fInfo.gold >= defCost * 2 + Math.floor(500 * pIdx)) {
                         fInfo.gold -= defCost;
                         GameState.tasks.push({ type: 'defense', castleId: castle.id, faction: castle.faction, daysLeft: 45, finishCost: defCost });
                     }
                 }
             }
 
-            // 🌟 3. 侵攻ロジック（遠征可能な兵糧があるか計算）
+            // 🌟 3. 侵攻・集結（後詰）ロジック
             const traits = getFactionTraits(castle.faction); 
             const threshold = maxT * traits.wait_threshold;
-            if (castle.troops < 150 || castle.troops < threshold || Math.random() > 0.3 * traits.aggression) return; 
-            if (fInfo.gold < 50 * pIdx) return; 
+            if (castle.troops < 300 || castle.troops < threshold || Math.random() > 0.4 * traits.aggression) return; 
+            if (fInfo.gold < Math.floor(50 * pIdx)) return; 
 
-            // 兵糧チェック (総維持費 + 遠征追加消費) の60日分があるか
-            let totalT = 0;
-            Object.values(GameState.castles).forEach(c => { if(c.faction===castle.faction) totalT += c.troops; });
-            GameState.armies.forEach(a => { if(a.faction===castle.faction) totalT += a.troops; });
-            let dailyEst = (totalT / 100) * 1 * pIdx + (deployableTroops / 100) * 2 * pIdx;
-            if (fInfo.food < dailyEst * 60) return; // 兵糧不足
+            // 兵糧チェック (部隊の120日分があるか)
+            let estimatedFoodCost = Math.floor((deployableTroops / 100) * 3 * pIdx * 120);
+            if (fInfo.food < estimatedFoodCost) return; 
 
             let candidates = Object.values(GameState.castles)
                 .filter(t => t.faction !== castle.faction && !areAllies(castle.faction, t.faction))
@@ -343,7 +391,11 @@ const gameEngine = {
                 const route = findShortestPath(castle.id, targetCastle.id);
                 if (!route) return;
 
-                const enemyStrength = targetCastle.troops + (targetCastle.siegeHP * 2); 
+                // 敵の強さを「兵数 + 耐久の半分」とし、工事中なら2割引
+                let enemyStrength = targetCastle.troops + (targetCastle.siegeHP * 0.5); 
+                let isUnderConst = GameState.tasks.some(t => t.castleId === targetCastle.id);
+                if (isUnderConst) enemyStrength *= 0.8;
+
                 if (deployableTroops < enemyStrength * 1.2 && targetCastle.faction !== 'independent') return;
 
                 const totalCost = route.reduce((sum, r) => sum + (r.dist / r.speedMod), 0);
@@ -354,12 +406,30 @@ const gameEngine = {
             });
 
             if (bestTarget) {
-                const army = window.deployArmy(castle.id, deployableTroops, true);
+                const army = window.deployArmy(castle.id, deployableTroops, true, 'attack');
                 if (army) {
-                    fInfo.gold -= 50 * pIdx; 
+                    fInfo.gold -= Math.floor(50 * pIdx); 
                     army.pathQueue = bestTarget.route; army.targetNodeId = bestTarget.id;
                     const tName = GameState.castles[bestTarget.id].name;
                     this.log(`<span class="log-ai">【出陣】${FactionMaster[castle.faction].name}が ${tName} へ侵攻開始！</span>`);
+                    
+                    // 🌟 後詰（周辺の味方城からも一斉出撃して加勢・合流する）
+                    const cNode = window.rawNodes.find(n => n.id === castle.id);
+                    Object.values(GameState.castles).forEach(allyC => {
+                        if (allyC.faction === castle.faction && allyC.id !== castle.id && allyC.troops > 800) {
+                            const aNode = window.rawNodes.find(n => n.id === allyC.id);
+                            if (map.distance(L.latLng(cNode.lat, cNode.lng), L.latLng(aNode.lat, aNode.lng)) < 30000) { 
+                                const aRoute = findShortestPath(allyC.id, bestTarget.id);
+                                if (aRoute) {
+                                    const allyArmy = window.deployArmy(allyC.id, Math.floor(allyC.troops * 0.5), true, 'attack');
+                                    if (allyArmy) {
+                                        fInfo.gold -= Math.floor(50 * pIdx);
+                                        allyArmy.pathQueue = aRoute; allyArmy.targetNodeId = bestTarget.id;
+                                    }
+                                }
+                            }
+                        }
+                    });
                 }
             }
         });
@@ -375,21 +445,18 @@ const gameEngine = {
         
         Object.values(GameState.castles).forEach(castle => {
             if (castle.siegeHP < castle.maxSiegeHP * 0.25) {
-                castle.siegeHP = Math.min(castle.maxSiegeHP * 0.25, castle.siegeHP + castle.maxSiegeHP * 0.05);
+                castle.siegeHP = Math.min(Math.floor(castle.maxSiegeHP * 0.25), Math.floor(castle.siegeHP + castle.maxSiegeHP * 0.05));
             }
 
             if (castle.faction === "independent") return;
             const maxTroops = getMaxTroops(castle);
             const traits = getFactionTraits(castle.faction);
 
-            // 🌟 商業（毎月・金）と 石高（秋のみ・兵糧）の完全分離
             let loyMult = Math.max(0.2, castle.loyalty / 100);
             
-            // 金の収入
             if(incomeGold[castle.faction] !== undefined) {
                 incomeGold[castle.faction] += Math.floor(castle.commerce * 0.2 * loyMult * pIdx);
             }
-            // 秋の兵糧収入
             if(isAutumnHarvest && incomeFood[castle.faction] !== undefined) {
                 incomeFood[castle.faction] += Math.floor(castle.currentKokudaka * 1.0 * loyMult * pIdx);
             }
@@ -410,7 +477,7 @@ const gameEngine = {
                 const nodeDef = window.rawNodes.find(n => n.id === castle.id);
                 const ikkiArmy = {
                     id: "army_" + (GameState.armyIdCounter++), faction: "independent", troops: ikkiTroops,
-                    pos: { lat: nodeDef.lat + 0.005, lng: nodeDef.lng + 0.005 }, pathQueue: [], targetNodeId: castle.id
+                    pos: { lat: nodeDef.lat + 0.005, lng: nodeDef.lng + 0.005 }, pathQueue: [], targetNodeId: castle.id, targetLatLng: null, task: 'attack'
                 };
                 ikkiArmy.pathQueue = window.findShortestPath(getClosestNode(ikkiArmy.pos).id, castle.id) || [];
                 GameState.armies.push(ikkiArmy);
@@ -418,17 +485,16 @@ const gameEngine = {
             }
         });
         
-        // 収入加算
         Object.keys(incomeGold).forEach(f => {
             if(GameState.factionsInfo[f]) {
-                GameState.factionsInfo[f].gold += incomeGold[f];
-                GameState.factionsInfo[f].food += incomeFood[f];
+                GameState.factionsInfo[f].gold += Math.floor(incomeGold[f]);
+                GameState.factionsInfo[f].food += Math.floor(incomeFood[f]);
             }
         });
 
         if (GameState.playerFaction) {
-            if(incomeGold[GameState.playerFaction] > 0) this.log(`<span style="color:#f1c40f;">商いにより、資金 ${incomeGold[GameState.playerFaction]} が入りました。</span>`);
-            if(isAutumnHarvest && incomeFood[GameState.playerFaction] > 0) this.log(`<span style="color:#d35400;">🌾 秋の収穫！年貢として兵糧 ${incomeFood[GameState.playerFaction]} が入りました。</span>`);
+            if(incomeGold[GameState.playerFaction] > 0) this.log(`<span style="color:#f1c40f;">商いにより、資金 ${Math.floor(incomeGold[GameState.playerFaction])} が入りました。</span>`);
+            if(isAutumnHarvest && incomeFood[GameState.playerFaction] > 0) this.log(`<span style="color:#d35400;">🌾 秋の収穫！年貢として兵糧 ${Math.floor(incomeFood[GameState.playerFaction])} が入りました。</span>`);
         }
 
         for (let f1 in GameState.hateMatrix) {
