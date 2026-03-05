@@ -68,13 +68,11 @@ function loadScenarioData(scenarioData) {
         });
     }
 
-    // 🌟 物価指数（Price Index）の計算
     let totalKoku = 0; let count = 0;
     Object.values(GameState.castles).forEach(c => { totalKoku += c.currentKokudaka; count++; });
     GameState.priceIndex = count > 0 ? (totalKoku / count) / 5000 : 1.0;
     if(GameState.priceIndex < 0.1) GameState.priceIndex = 0.1; 
 
-    // 全勢力に初期資源（秋までのつなぎ）
     Object.keys(FactionMaster).forEach(f => {
         GameState.factionsInfo[f] = { 
             gold: Math.floor(2000 * GameState.priceIndex), 
@@ -142,17 +140,33 @@ function getClosestNode(latlng) {
 
 map.on('click', (e) => { selection = { type: null, id: null }; updateUI(); drawMap(); });
 
+// 🌟 街道待機（座標への直接移動指示）を含む右クリック
 map.on('contextmenu', (e) => {
     e.originalEvent.preventDefault();
     if (selection.type !== 'army') return;
     const army = GameState.armies.find(a => a.id === selection.id);
     if (!army || GameState.playerFaction === null || army.faction !== GameState.playerFaction) return;
-    const closestCastle = getClosestNode(e.latlng);
-    const distToCastle = map.distance(e.latlng, L.latLng(closestCastle.lat, closestCastle.lng));
-    if (closestCastle && closestCastle.type !== "5" && closestCastle.type !== "0" && distToCastle < 5000) {
-        const route = findShortestPath(getClosestNode(army.pos).id, closestCastle.id);
-        if(route) { army.pathQueue = route; army.targetNodeId = closestCastle.id; gameEngine.log(`目標を [${closestCastle.name}] に設定。`); updateUI(); drawMap(); return; }
+
+    const closestNode = getClosestNode(e.latlng);
+    const distToNode = map.distance(e.latlng, L.latLng(closestNode.lat, closestNode.lng));
+    let route = findShortestPath(getClosestNode(army.pos).id, closestNode.id);
+    if (!route) route = []; 
+
+    // 城の近くをクリックした場合は城を目標にする。それ以外は「クリックした道そのもの」を目標座標とする。
+    if (distToNode < 3000 && closestNode.type !== "5" && closestNode.type !== "0") {
+        army.pathQueue = route; 
+        army.targetNodeId = closestNode.id;
+        army.targetLatLng = null;
+        army.task = 'attack';
+        gameEngine.log(`目標を [${GameState.castles[closestNode.id].name}] に設定。`);
+    } else {
+        army.pathQueue = route;
+        army.targetNodeId = null;
+        army.targetLatLng = { lat: e.latlng.lat, lng: e.latlng.lng }; // 座標を記憶
+        army.task = 'hold'; // 待機・迎撃任務
+        gameEngine.log(`目標を街道での [待機・迎撃] に設定。`);
     }
+    updateUI(); drawMap();
 });
 
 window.handleNodeLeftClick = function(nodeId, e) {
@@ -167,7 +181,8 @@ window.handleArmyClick = function(armyId, e) {
     selection = { type: 'army', id: armyId }; updateUI(); drawMap();
 };
 
-window.deployArmy = function(castleId = null, deployAmount = null, isAI = false) {
+// 🌟 task パラメータを追加
+window.deployArmy = function(castleId = null, deployAmount = null, isAI = false, task = 'attack') {
     const cId = castleId || selection.id; const castle = GameState.castles[cId]; if (!castle) return;
     const amount = deployAmount || parseInt(document.getElementById('deploy-amount').value);
     if (isNaN(amount) || amount <= 0 || amount > castle.troops) return;
@@ -181,14 +196,13 @@ window.deployArmy = function(castleId = null, deployAmount = null, isAI = false)
 
     const army = {
         id: "army_" + (GameState.armyIdCounter++), faction: castle.faction, troops: amount,
-        pos: { lat: nodeDef.lat, lng: nodeDef.lng }, pathQueue: [], targetNodeId: null
+        pos: { lat: nodeDef.lat, lng: nodeDef.lng }, pathQueue: [], targetNodeId: null, targetLatLng: null, task: task
     };
     GameState.armies.push(army);
     if(!isAI) { selection = { type: 'army', id: army.id }; updateUI(); drawMap(); }
     return army;
 };
 
-// 🌟 工期システムに対応したコマンド実行
 window.executeCommand = function(cmd) {
     if (selection.type !== 'castle') return;
     const castle = GameState.castles[selection.id];
@@ -246,6 +260,8 @@ function drawMap() {
             army.pathQueue.forEach(step => {
                 const pn = window.rawNodes.find(n => n.id === step.nodeId); if (pn) routeCoords.push([pn.lat, pn.lng]);
             });
+            // 目標座標（targetLatLng）がある場合は、パスの最後にその座標を繋ぐ
+            if(army.targetLatLng) routeCoords.push([army.targetLatLng.lat, army.targetLatLng.lng]);
             L.polyline(routeCoords, { color: '#f1c40f', weight: 4, dashArray: '6,6', opacity: 0.9 }).addTo(edgeLayer);
         }
     }
@@ -274,6 +290,7 @@ function drawMap() {
         if (army.troops <= 0) return;
         const isSelected = (selection.type === 'army' && selection.id === army.id);
         const factionColor = FactionMaster[army.faction]?.color || "#000";
+        const transStyle = army.task === 'transport' ? 'border-style: dashed;' : ''; // 輸送隊は破線
 
         const htmlStr = `⚔️<div class="army-troops-label" style="position:absolute; top:-15px; font-weight:bold; color:#1a252f; text-shadow:1px 1px 0 #fff,-1px -1px 0 #fff; white-space:nowrap;">${army.troops}</div>`;
         const marker = L.marker([army.pos.lat, army.pos.lng], { 
@@ -282,6 +299,8 @@ function drawMap() {
         }).addTo(armyLayer);
         
         marker.getElement().style.backgroundColor = factionColor;
+        if(army.task === 'transport') marker.getElement().style.borderStyle = 'dashed';
+
         window.armyMarkers[army.id] = marker; 
         marker.on('click', (e) => handleArmyClick(army.id, e));
     });
@@ -341,7 +360,7 @@ window.disbandArmy = function(armyId) {
 
 function updateRightPanel() {
     const panel = document.getElementById('info-content');
-    const guideHtml = `<div class="instruction"><b>【操作】</b> 左クリック: 選択 | 右クリック: 軍移動 <br> <b>【ｼｮｰﾄｶｯﾄ】</b> Spaceキー: 再生/停止</div>`;
+    const guideHtml = `<div class="instruction"><b>【操作】</b> 左クリック: 選択 | 右クリック: 軍移動/街道待機 <br> <b>【ｼｮｰﾄｶｯﾄ】</b> Spaceキー: 再生/停止</div>`;
 
     if (selection.type === null) { panel.innerHTML = `<p style="font-size: 12px; color: #7f8c8d;">マップ上の城や部隊をクリック</p>` + guideHtml; return; }
 
@@ -349,13 +368,17 @@ function updateRightPanel() {
         const army = GameState.armies.find(a => a.id === selection.id); if (!army) return;
         const factionData = FactionMaster[army.faction] || {name: "不明", color: "#000"};
         let destName = '待機中';
-        if (army.pathQueue.length > 0) {
+        if (army.targetLatLng) {
+            destName = '街道に布陣中';
+        } else if (army.pathQueue.length > 0) {
             const lastNodeId = army.pathQueue[army.pathQueue.length - 1].nodeId;
             destName = window.rawNodes.find(n => n.id === lastNodeId)?.name || '地点';
         }
+        let taskStr = army.task === 'transport' ? ' (輸送隊)' : (army.task === 'hold' ? ' (迎撃部隊)' : '');
+
         panel.innerHTML = `
             <div class="panel-section" style="border-top: 4px solid ${factionData.color};">
-                <div style="font-size: 16px; font-weight: bold; margin-bottom: 5px;">軍勢ユニット</div>
+                <div style="font-size: 16px; font-weight: bold; margin-bottom: 5px;">軍勢ユニット${taskStr}</div>
                 <div class="data-row"><span>所属:</span> <b style="color:${factionData.color};">${factionData.name}</b></div>
                 <div class="data-row"><span>兵力:</span> <b>${army.troops} 人</b></div>
                 <div class="data-row"><span>目標:</span> <b style="color:#e74c3c;">${destName}</b></div>
