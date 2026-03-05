@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>戦国統治シミュレーション - 外交関係・同盟強度拡張版</title>
+    <title>戦国統治シミュレーション - 兵站・城別リソース完全版</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <link rel="stylesheet" href="style.css">
 </head>
@@ -19,8 +19,8 @@
     </div>
 
     <div class="status-item">📅 日付: <span id="ui-season">🌸春</span> <span id="ui-date" class="status-value">----年 --月 --日</span></div>
-    <div class="status-item">💰 金: <span id="ui-gold" class="status-value">0</span></div>
-    <div class="status-item">🌾 兵糧: <span id="ui-food" class="status-value">0</span></div>
+    <div class="status-item" title="自勢力の総計">💰 総資金: <span id="ui-gold" class="status-value">0</span></div>
+    <div class="status-item" title="自勢力の総計">🌾 総兵糧: <span id="ui-food" class="status-value">0</span></div>
     <div style="flex: 1;"></div>
     
     <div class="slider-container">
@@ -36,7 +36,7 @@
     <div id="map-container">
         <div id="map"></div>
         <div id="overlay-start">
-            <h2>戦国統治シミュレーション - 外交関係・同盟強度拡張版</h2>
+            <h2>戦国統治シミュレーション - 兵站・城別リソース完全版</h2>
             <p>1. マップデータ、2. シナリオデータの順に読み込んでください。</p>
         </div>
     </div>
@@ -62,7 +62,6 @@
     <div class="modal-content">
         <span class="close-btn" onclick="toggleStatsModal()">×</span>
         <h2 style="border-bottom:none; margin-bottom:0;">📊 諸大名統計帳</h2>
-        <p style="font-size: 12px; color: #7f8c8d; margin-top: 0;">AIの資金・兵糧、外交関係（和睦・同盟・盟友）、国力を確認できます。</p>
         <div id="stats-table-container"></div>
     </div>
 </div>
