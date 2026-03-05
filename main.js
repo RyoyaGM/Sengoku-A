@@ -65,8 +65,8 @@ function loadScenarioData(scenarioData) {
     }
 
     GameState.hasStarted = true;
-    document.getElementById('btnNextMonth').disabled = false;
-    document.getElementById('btnAutoPlay').disabled = false;
+    // リアルタイム用のボタンを有効化
+    document.getElementById('btnToggleTime').disabled = false;
     
     gameEngine.log("シナリオデータを適用しました！");
     updateUI(); drawMap();
@@ -149,19 +149,9 @@ function getClosestPointOnEdges(latlng) {
     return { latlng: minPt, edge: targetEdge, pixelDist: minPixelDist };
 }
 
-window.toggleAutoPlay = function() {
-    GameState.isAutoPlay = !GameState.isAutoPlay;
-    const btn = document.getElementById('btnAutoPlay');
-    if (GameState.isAutoPlay) {
-        btn.innerText = '⏸ 自動進行 停止'; btn.classList.add('active');
-        if (!GameState.isAnimating) gameEngine.nextMonth();
-    } else {
-        btn.innerText = '▶ 自動進行(観戦)'; btn.classList.remove('active');
-    }
-};
-
 map.on('click', (e) => {
-    if(!GameState.isAnimating) { selection = { type: null, id: null }; updateUI(); drawMap(); }
+    // リアルタイムなので、アニメーション中という縛りをなくしていつでも選択解除できるようにする
+    selection = { type: null, id: null }; updateUI(); drawMap();
 });
 
 map.on('contextmenu', (e) => {
@@ -215,12 +205,12 @@ window.handleNodeLeftClick = function(nodeId, e) {
     L.DomEvent.stopPropagation(e);
     const node = window.rawNodes.find(n => n.id === nodeId);
     if (!node || node.type === "5" || node.type === "0") return;
-    if (!GameState.isAnimating) { selection = { type: 'castle', id: nodeId }; updateUI(); drawMap(); }
+    selection = { type: 'castle', id: nodeId }; updateUI(); drawMap();
 };
 
 window.handleArmyClick = function(armyId, e) {
     L.DomEvent.stopPropagation(e);
-    if (!GameState.isAnimating) { selection = { type: 'army', id: armyId }; updateUI(); drawMap(); }
+    selection = { type: 'army', id: armyId }; updateUI(); drawMap();
 };
 
 window.deployArmy = function(castleId = null, deployAmount = null, isAI = false) {
@@ -333,7 +323,7 @@ function drawMap() {
 function updateUI() {
     if (!GameState.isLoaded) return;
     if (GameState.hasStarted) {
-        document.getElementById('ui-date').innerText = `${GameState.year}年 ${GameState.month}月`;
+        document.getElementById('ui-date').innerText = `${GameState.year}年 ${GameState.month}月 ${GameState.day}日`;
         document.getElementById('ui-gold').innerText = GameState.gold;
     }
     updateRightPanel();
@@ -405,9 +395,9 @@ function updateRightPanel() {
                 <div class="data-row"><span>兵力:</span> <b>${army.troops} 人</b></div>
                 <div class="data-row"><span>目標:</span> <b style="color:#e74c3c;">${destName}</b></div>
             </div>
-            ${army.faction === "player" && !GameState.isAutoPlay ? `
+            ${army.faction === "player" ? `
             <div class="panel-section" style="background-color: #f9f9f9;">
-                <button class="action-btn" onclick="disbandArmy('${army.id}')" style="background-color:#95a5a6;" ${GameState.isAnimating ? 'disabled' : ''}>⛺ その場で解散</button>
+                <button class="action-btn" onclick="disbandArmy('${army.id}')" style="background-color:#95a5a6;">⛺ その場で解散</button>
             </div>` : ''}` + guideHtml;
         return;
     }
@@ -429,21 +419,41 @@ function updateRightPanel() {
                 <div class="data-row"><span>防御 (城壁):</span> <b style="color:#7f8c8d;">${castle.defense}</b></div>
                 <div class="data-row"><span>守備兵力:</span> <b>${castle.troops} / MAX ${maxT}</b></div>
             </div>
-            ${!isPlayer && !GameState.isAutoPlay ? `
+            ${!isPlayer ? `
             <div class="panel-section"><button class="action-btn" onclick="raiseFlag()">🎌 ここで旗揚げする (操作を奪う)</button></div>
             ` : ''}
-            ${isPlayer && !GameState.isAutoPlay ? `
+            ${isPlayer ? `
             <div class="panel-section" style="background-color: #fdf2e9;">
                 <div style="font-weight: bold; margin-bottom: 5px; font-size: 13px;">⚔️ 出陣</div>
                 <input type="number" id="deploy-amount" value="${Math.floor(castle.troops * 0.5)}" max="${castle.troops}">
-                <button class="action-btn" onclick="deployArmy()" ${GameState.isAnimating ? 'disabled' : ''}>部隊を出撃させる (金50)</button>
+                <button class="action-btn" onclick="deployArmy()">部隊を出撃させる (金50)</button>
             </div>
             <div class="panel-section">
                 <div style="font-weight: bold; margin-bottom: 5px; font-size: 13px;">🛠️ 内政・軍事コマンド</div>
-                <button class="cmd-btn action-btn" onclick="executeCommand('agriculture')" ${GameState.isAnimating ? 'disabled' : ''}>🌾 開墾 (金50) - 石高UP</button>
-                <button class="cmd-btn action-btn" onclick="executeCommand('commerce')" ${GameState.isAnimating ? 'disabled' : ''}>💰 市の保護 (金50) - 商業UP</button>
-                <button class="cmd-btn action-btn" onclick="executeCommand('defense')" ${GameState.isAnimating ? 'disabled' : ''}>🏯 城郭改修 (金100) - 防御UP</button>
-                <button class="cmd-btn action-btn" onclick="executeCommand('conscript')" ${GameState.isAnimating ? 'disabled' : ''}>🗣️ 臨時徴兵 (金100) - 兵+300</button>
+                <button class="cmd-btn action-btn" onclick="executeCommand('agriculture')">🌾 開墾 (金50) - 石高UP</button>
+                <button class="cmd-btn action-btn" onclick="executeCommand('commerce')">💰 市の保護 (金50) - 商業UP</button>
+                <button class="cmd-btn action-btn" onclick="executeCommand('defense')">🏯 城郭改修 (金100) - 防御UP</button>
+                <button class="cmd-btn action-btn" onclick="executeCommand('conscript')">🗣️ 臨時徴兵 (金100) - 兵+300</button>
             </div>` : ''}` + guideHtml;
     }
 }
+
+// 部隊マーカーだけを少しずつ動かす関数
+window.updateArmyMarkers = function() {
+    let needsFullRedraw = false;
+    
+    GameState.armies.forEach(army => {
+        if (army.troops <= 0) {
+            needsFullRedraw = true; // 壊滅した部隊がいる場合は全体再描画へ
+            return;
+        }
+        const marker = window.armyMarkers[army.id];
+        if (marker) {
+            marker.setLatLng([army.pos.lat, army.pos.lng]); // マーカーだけをスッと動かす
+        } else {
+            needsFullRedraw = true; // 新規出陣があった場合も全体再描画へ
+        }
+    });
+    
+    if (needsFullRedraw) drawMap();
+};
