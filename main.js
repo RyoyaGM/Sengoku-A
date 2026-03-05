@@ -65,10 +65,11 @@ function loadScenarioData(scenarioData) {
     }
 
     GameState.hasStarted = true;
-    // リアルタイム用のボタンを有効化
-    document.getElementById('btnToggleTime').disabled = false;
     
-    gameEngine.log("シナリオデータを適用しました！");
+    // コントロールパネルを表示
+    document.getElementById('time-controls').style.display = 'flex';
+    
+    gameEngine.log("シナリオデータを適用しました。プレイする大名の城を選んでください！（または観戦）");
     updateUI(); drawMap();
 }
 
@@ -150,7 +151,6 @@ function getClosestPointOnEdges(latlng) {
 }
 
 map.on('click', (e) => {
-    // リアルタイムなので、アニメーション中という縛りをなくしていつでも選択解除できるようにする
     selection = { type: null, id: null }; updateUI(); drawMap();
 });
 
@@ -158,7 +158,7 @@ map.on('contextmenu', (e) => {
     e.originalEvent.preventDefault();
     if (selection.type !== 'army') return;
     const army = GameState.armies.find(a => a.id === selection.id);
-    if (!army || army.faction !== 'player') return;
+    if (!army || GameState.playerFaction === null || army.faction !== GameState.playerFaction) return;
 
     const closestCastle = getClosestNode(e.latlng);
     const distToCastle = map.distance(e.latlng, L.latLng(closestCastle.lat, closestCastle.lng));
@@ -307,6 +307,7 @@ function drawMap() {
     });
 
     GameState.armies.forEach(army => {
+        if (army.troops <= 0) return; // 0兵は描画しない
         const isSelected = (selection.type === 'army' && selection.id === army.id);
         const factionColor = FactionMaster[army.faction]?.color || "#000";
 
@@ -332,7 +333,7 @@ function updateUI() {
 
 function updateRanking() {
     const stats = {};
-    Object.keys(FactionMaster).forEach(k => { if(k !== 'independent' && k !== 'player') stats[k] = { id: k, castles: 0, troops: 0 }; });
+    Object.keys(FactionMaster).forEach(k => { if(k !== 'independent') stats[k] = { id: k, castles: 0, troops: 0 }; });
 
     Object.values(GameState.castles).forEach(c => {
         if (stats[c.faction]) { stats[c.faction].castles++; stats[c.faction].troops += c.troops; }
@@ -354,11 +355,14 @@ function updateRanking() {
     document.getElementById('ranking-content').innerHTML = html || '<p style="font-size: 11px;">ランキングデータがありません</p>';
 }
 
-window.raiseFlag = function() {
-    if (selection.type !== 'castle') return;
-    GameState.castles[selection.id].faction = "player";
-    GameState.castles[selection.id].troops = getMaxTroops(GameState.castles[selection.id]); 
-    gameEngine.log(`【旗揚げ】${GameState.castles[selection.id].name} にてプレイヤー軍が蜂起しました！`);
+// 旗揚げの代わりに「既存の勢力（大名）を担当する」機能
+window.playAsFaction = function(factionId) {
+    GameState.playerFaction = factionId;
+    GameState.isAutoWatch = false; 
+    document.getElementById('btnAutoWatch').innerText = '👀 自動観戦';
+    document.getElementById('btnAutoWatch').style.backgroundColor = '#9b59b6';
+    
+    gameEngine.log(`【開始】${FactionMaster[factionId].name} を担当して天下を目指します！`);
     updateUI(); drawMap();
 };
 
@@ -368,6 +372,7 @@ window.disbandArmy = function(armyId) {
     GameState.armies.splice(armyIndex, 1);
     selection = { type: null, id: null };
     gameEngine.log(`【解散】部隊を解散しました。`);
+    if (typeof window.updateArmyMarkers === 'function') window.updateArmyMarkers();
     updateUI(); drawMap();
 };
 
@@ -395,7 +400,7 @@ function updateRightPanel() {
                 <div class="data-row"><span>兵力:</span> <b>${army.troops} 人</b></div>
                 <div class="data-row"><span>目標:</span> <b style="color:#e74c3c;">${destName}</b></div>
             </div>
-            ${army.faction === "player" ? `
+            ${GameState.playerFaction !== null && army.faction === GameState.playerFaction ? `
             <div class="panel-section" style="background-color: #f9f9f9;">
                 <button class="action-btn" onclick="disbandArmy('${army.id}')" style="background-color:#95a5a6;">⛺ その場で解散</button>
             </div>` : ''}` + guideHtml;
@@ -407,7 +412,7 @@ function updateRightPanel() {
         if (!castle) return;
 
         const factionData = FactionMaster[castle.faction] || {name: "不明", color: "#000"};
-        const isPlayer = castle.faction === "player";
+        const isPlayer = GameState.playerFaction !== null && castle.faction === GameState.playerFaction;
         const maxT = getMaxTroops(castle);
 
         panel.innerHTML = `
@@ -419,8 +424,8 @@ function updateRightPanel() {
                 <div class="data-row"><span>防御 (城壁):</span> <b style="color:#7f8c8d;">${castle.defense}</b></div>
                 <div class="data-row"><span>守備兵力:</span> <b>${castle.troops} / MAX ${maxT}</b></div>
             </div>
-            ${!isPlayer ? `
-            <div class="panel-section"><button class="action-btn" onclick="raiseFlag()">🎌 ここで旗揚げする (操作を奪う)</button></div>
+            ${GameState.playerFaction === null && castle.faction !== "independent" ? `
+            <div class="panel-section"><button class="action-btn" onclick="playAsFaction('${castle.faction}')" style="background-color: #e67e22; font-weight:bold;">🎌 この大名でプレイする</button></div>
             ` : ''}
             ${isPlayer ? `
             <div class="panel-section" style="background-color: #fdf2e9;">
@@ -438,22 +443,48 @@ function updateRightPanel() {
     }
 }
 
-// 部隊マーカーだけを少しずつ動かす関数
+// 0兵のマーカーを確実に削除しつつ更新する
 window.updateArmyMarkers = function() {
     let needsFullRedraw = false;
     
-    GameState.armies.forEach(army => {
-        if (army.troops <= 0) {
-            needsFullRedraw = true; // 壊滅した部隊がいる場合は全体再描画へ
-            return;
+    // GameState.armies に存在しない（消滅した）部隊のマーカーを消去
+    Object.keys(window.armyMarkers).forEach(id => {
+        if (!GameState.armies.find(a => a.id === id)) {
+            if(armyLayer.hasLayer(window.armyMarkers[id])) {
+                armyLayer.removeLayer(window.armyMarkers[id]);
+            }
+            delete window.armyMarkers[id];
         }
+    });
+
+    GameState.armies.forEach(army => {
         const marker = window.armyMarkers[army.id];
         if (marker) {
-            marker.setLatLng([army.pos.lat, army.pos.lng]); // マーカーだけをスッと動かす
+            marker.setLatLng([army.pos.lat, army.pos.lng]); 
         } else {
-            needsFullRedraw = true; // 新規出陣があった場合も全体再描画へ
+            needsFullRedraw = true; // 新規部隊がいる場合は再描画
         }
     });
     
     if (needsFullRedraw) drawMap();
+};
+
+// スライダーの数値を「秒」で表示
+window.updateSpeedDisplay = function() {
+    const val = document.getElementById('speedSlider').value;
+    document.getElementById('speedDisplay').innerText = (val / 1000).toFixed(2) + "秒";
+};
+
+// 自動観戦の切り替え
+window.toggleAutoWatch = function() {
+    GameState.isAutoWatch = !GameState.isAutoWatch;
+    const btn = document.getElementById('btnAutoWatch');
+    if (GameState.isAutoWatch) {
+        btn.style.backgroundColor = '#8e44ad';
+        btn.innerText = '👀 観戦中(合戦で止まらない)';
+        if (GameState.isPaused) gameEngine.toggleTime(); // 停止中なら動かす
+    } else {
+        btn.style.backgroundColor = '#9b59b6';
+        btn.innerText = '👀 自動観戦';
+    }
 };
