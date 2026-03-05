@@ -37,3 +37,33 @@ button:disabled { background-color: #95a5a6 !important; cursor: not-allowed; opa
 #overlay-start { position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: rgba(44, 62, 80, 0.9); z-index: 3000; display: flex; flex-direction: column; justify-content: center; align-items: center; color: white; }
 .slider-container { display: flex; align-items: center; gap: 8px; background: rgba(0,0,0,0.3); padding: 5px 10px; border-radius: 4px;}
 .instruction { font-size: 11px; background-color: #fff3cd; color: #856404; padding: 8px; border-radius: 4px; border: 1px solid #ffeeba; margin-top: 10px; line-height: 1.4; }
+/* --- 追加：演出・UI用スタイル --- */
+#ui-season { font-size: 16px; margin-right: 10px; font-weight: bold; }
+.season-spring { color: #e84393; }
+.season-summer { color: #27ae60; }
+.season-autumn { color: #d35400; }
+.season-winter { color: #2980b9; }
+
+/* 攻城ゲージ */
+.siege-bar-container { position: absolute; bottom: -8px; left: -20px; width: 60px; height: 5px; background: rgba(0,0,0,0.7); border-radius: 2px; overflow: hidden; }
+.siege-bar { height: 100%; background: #e74c3c; width: 100%; transition: width 0.2s; }
+
+/* フローティングテキスト（ダメージや落城表示） */
+.floating-text-icon { pointer-events: none; }
+.floating-text {
+    font-size: 18px; font-weight: bold; white-space: nowrap;
+    text-shadow: 1px 1px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000;
+    animation: floatUp 2s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+}
+@keyframes floatUp {
+    0% { opacity: 1; transform: translateY(0) scale(0.5); }
+    20% { transform: translateY(-10px) scale(1.2); }
+    100% { opacity: 0; transform: translateY(-40px) scale(1); }
+}
+
+/* 拠点フラッシュ演出 */
+.castle-flash { animation: captureFlash 1s ease-out; }
+@keyframes captureFlash {
+    0% { box-shadow: 0 0 30px 15px rgba(255, 255, 255, 1); transform: scale(1.5); }
+    100% { box-shadow: 0 0 0 0 rgba(255, 255, 255, 0); transform: scale(1); }
+}
