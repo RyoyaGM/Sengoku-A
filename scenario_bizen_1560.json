@@ -1,0 +1,242 @@
+{
+  "factions": {
+    "uragami": {
+      "name": "浦上家",
+      "color": "#2980b9",
+      "traits": {
+        "aggression": 0.8,
+        "wait_threshold": 0.7,
+        "combat_bonus": 1.0
+      }
+    },
+    "ukita": {
+      "name": "宇喜多家",
+      "color": "#e67e22",
+      "traits": {
+        "aggression": 1.2,
+        "wait_threshold": 0.6,
+        "combat_bonus": 1.2
+      }
+    },
+    "matsuda": {
+      "name": "松田家",
+      "color": "#c0392b",
+      "traits": {
+        "aggression": 1.1,
+        "wait_threshold": 0.6,
+        "combat_bonus": 1.1
+      }
+    },
+    "kanamitsu": {
+      "name": "金光家",
+      "color": "#f1c40f",
+      "traits": {
+        "aggression": 0.5,
+        "wait_threshold": 0.8,
+        "combat_bonus": 1.0
+      }
+    },
+    "mimura": {
+      "name": "三村家",
+      "color": "#27ae60",
+      "traits": {
+        "aggression": 0.9,
+        "wait_threshold": 0.7,
+        "combat_bonus": 1.1
+      }
+    },
+    "mouri": {
+      "name": "毛利家",
+      "color": "#d35400",
+      "traits": {
+        "aggression": 1.0,
+        "wait_threshold": 0.7,
+        "combat_bonus": 1.2
+      }
+    },
+    "suzuki": {
+      "name": "須々木家",
+      "color": "#7f8c8d",
+      "traits": {
+        "aggression": 0.5,
+        "wait_threshold": 0.8,
+        "combat_bonus": 1.0
+      }
+    },
+    "nose": {
+      "name": "能勢家",
+      "color": "#9b59b6",
+      "traits": {
+        "aggression": 0.5,
+        "wait_threshold": 0.8,
+        "combat_bonus": 1.0
+      }
+    },
+    "independent": {
+      "name": "備前諸勢力",
+      "color": "#95a5a6"
+    }
+  },
+  "castles": {
+    "石山城": {
+      "faction": "kanamitsu",
+      "kokudaka": 14330
+    },
+    "富山城": {
+      "faction": "matsuda",
+      "kokudaka": 4300
+    },
+    "船山城": {
+      "faction": "suzuki",
+      "kokudaka": 4300
+    },
+    "片上港": {
+      "faction": "kanamitsu",
+      "kokudaka": 1430
+    },
+    "金山寺": {
+      "faction": "independent",
+      "kokudaka": 1430
+    },
+    "金川城": {
+      "faction": "matsuda",
+      "kokudaka": 15750
+    },
+    "虎倉城": {
+      "faction": "matsuda",
+      "kokudaka": 4730
+    },
+    "徳倉城": {
+      "faction": "matsuda",
+      "kokudaka": 4730
+    },
+    "吉備津彦神社": {
+      "faction": "independent",
+      "kokudaka": 1580
+    },
+    "三石城": {
+      "faction": "uragami",
+      "kokudaka": 5150
+    },
+    "天神山城": {
+      "faction": "uragami",
+      "kokudaka": 5150
+    },
+    "富田松山城": {
+      "faction": "uragami",
+      "kokudaka": 1550
+    },
+    "日笠青山城": {
+      "faction": "uragami",
+      "kokudaka": 1550
+    },
+    "北曽根城": {
+      "faction": "uragami",
+      "kokudaka": 1550
+    },
+    "東山城": {
+      "faction": "uragami",
+      "kokudaka": 1550
+    },
+    "香登城": {
+      "faction": "uragami",
+      "kokudaka": 1550
+    },
+    "片上": {
+      "faction": "uragami",
+      "kokudaka": 520
+    },
+    "伊部": {
+      "faction": "uragami",
+      "kokudaka": 520
+    },
+    "虫明港": {
+      "faction": "uragami",
+      "kokudaka": 520
+    },
+    "保木城": {
+      "faction": "uragami",
+      "kokudaka": 10000
+    },
+    "西谷城": {
+      "faction": "matsuda",
+      "kokudaka": 8860
+    },
+    "周匝茶臼山城": {
+      "faction": "uragami",
+      "kokudaka": 8860
+    },
+    "白石城": {
+      "faction": "uragami",
+      "kokudaka": 8860
+    },
+    "砥石城": {
+      "faction": "ukita",
+      "kokudaka": 19940
+    },
+    "乙子城": {
+      "faction": "ukita",
+      "kokudaka": 5980
+    },
+    "備前福岡": {
+      "faction": "ukita",
+      "kokudaka": 1990
+    },
+    "余慶寺": {
+      "faction": "independent",
+      "kokudaka": 1990
+    },
+    "牛窓港": {
+      "faction": "ukita",
+      "kokudaka": 1990
+    },
+    "沼城": {
+      "faction": "ukita",
+      "kokudaka": 21790
+    },
+    "龍ノ口城": {
+      "faction": "mouri",
+      "kokudaka": 6540
+    },
+    "西大寺門前町": {
+      "faction": "independent",
+      "kokudaka": 2180
+    },
+    "藤井": {
+      "faction": "ukita",
+      "kokudaka": 2180
+    },
+    "西大寺": {
+      "faction": "independent",
+      "kokudaka": 2180
+    },
+    "常山城": {
+      "faction": "mimura",
+      "kokudaka": 10300
+    },
+    "新庄山城": {
+      "faction": "ukita",
+      "kokudaka": 3090
+    },
+    "本太城": {
+      "faction": "nose",
+      "kokudaka": 3090
+    },
+    "下津井港": {
+      "faction": "mimura",
+      "kokudaka": 1030
+    },
+    "日比港": {
+      "faction": "mimura",
+      "kokudaka": 1030
+    },
+    "八浜港": {
+      "faction": "mimura",
+      "kokudaka": 1030
+    },
+    "藤戸": {
+      "faction": "mimura",
+      "kokudaka": 1030
+    }
+  }
+}
