@@ -18,18 +18,15 @@
         <input type="file" id="scenarioLoader" accept=".json" disabled>
     </div>
 
-    <div class="status-item">📅 年月: <span id="ui-date" class="status-value">----年 --月</span></div>
+    <div class="status-item">📅 日付: <span id="ui-date" class="status-value">----年 --月 --日</span></div>
     <div class="status-item">💰 資金: <span id="ui-gold" class="status-value">0</span></div>
     <div style="flex: 1;"></div>
     
     <div class="slider-container">
-        <span style="font-size: 11px;">行軍速度:</span>
-        <input type="range" id="speedSlider" min="5" max="150" value="40" oninput="updateSpeedLabel()" style="width: 80px;">
-        <span id="speedLabel" style="font-size: 12px; font-weight: bold; color: #f1c40f; width: 45px;">40 km</span>
-    </div>
-
-    <button id="btnAutoPlay" class="action-btn auto-btn" onclick="toggleAutoPlay()" disabled>▶ 自動進行(観戦)</button>
-    <button id="btnNextMonth" class="action-btn" style="width: 120px;" onclick="gameEngine.nextMonth()" disabled>⏭ 1ヶ月進める</button>
+    <span style="font-size: 11px;">進行スピード:</span>
+    <input type="range" id="speedSlider" min="20" max="300" value="100" style="width: 80px; direction: rtl;" title="左へ動かすほど速く進みます">
+</div>
+<button id="btnToggleTime" class="action-btn" style="width: 160px; font-weight: bold;" onclick="gameEngine.toggleTime()" disabled>▶ 時間を進める</button>
 </div>
 
 <div id="main-container">
@@ -61,3 +58,4 @@
 
 </body>
 </html>
+
