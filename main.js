@@ -16,7 +16,7 @@ document.getElementById('mapLoader').addEventListener('change', function(e) {
 function loadMapData(mapData) {
     window.rawNodes = mapData.nodes || []; window.rawEdges = mapData.edges || [];
     GameState.castles = {}; GameState.armies = []; GameState.alliances = new Set(); GameState.hateMatrix = {};
-    GameState.factionsInfo = {}; 
+    GameState.factionsInfo = {}; GameState.tasks = [];
     buildGraph();
 
     window.rawNodes.forEach(n => {
@@ -29,8 +29,7 @@ function loadMapData(mapData) {
 
             let castleObj = {
                 id: n.id, name: n.name, type: n.type, nodeTypeName: typeName, faction: "independent",
-                currentKokudaka: 5000, commerce: 100 * comMult, defense: 100, troops: 0,
-                loyalty: 100 // 民忠の追加
+                currentKokudaka: 5000, commerce: 100 * comMult, defense: 100, troops: 0, loyalty: 100
             };
             castleObj.troops = getMaxTroops(castleObj);
             castleObj.maxSiegeHP = castleObj.defense * hpMult;
@@ -58,10 +57,6 @@ function loadScenarioData(scenarioData) {
     document.getElementById('overlay-start').style.display = 'none';
     if(scenarioData.factions) FactionMaster = { ...FactionMaster, ...scenarioData.factions };
 
-    Object.keys(FactionMaster).forEach(f => {
-        GameState.factionsInfo[f] = { gold: 3000 };
-    });
-
     if(scenarioData.castles) {
         Object.values(GameState.castles).forEach(castle => {
             const sData = scenarioData.castles[castle.name];
@@ -73,25 +68,30 @@ function loadScenarioData(scenarioData) {
         });
     }
 
+    // 🌟 物価指数（Price Index）の計算
+    let totalKoku = 0; let count = 0;
+    Object.values(GameState.castles).forEach(c => { totalKoku += c.currentKokudaka; count++; });
+    GameState.priceIndex = count > 0 ? (totalKoku / count) / 5000 : 1.0;
+    if(GameState.priceIndex < 0.1) GameState.priceIndex = 0.1; 
+
+    // 全勢力に初期資源（秋までのつなぎ）
+    Object.keys(FactionMaster).forEach(f => {
+        GameState.factionsInfo[f] = { 
+            gold: Math.floor(2000 * GameState.priceIndex), 
+            food: Math.floor(5000 * GameState.priceIndex) 
+        };
+    });
+
     GameState.hasStarted = true;
     document.getElementById('btnToggleTime').disabled = false;
-    gameEngine.log("シナリオデータを適用しました。プレイする大名を選んでください！");
+    gameEngine.log(`シナリオデータ適用（物価指数: ${GameState.priceIndex.toFixed(2)}）。プレイする大名を選んでください！`);
     updateUI(); drawMap();
 }
 
-window.getGold = function() {
-    if (GameState.playerFaction && GameState.factionsInfo[GameState.playerFaction]) {
-        return GameState.factionsInfo[GameState.playerFaction].gold;
-    }
-    return GameState.gold;
-};
-window.useGold = function(amount) {
-    if (GameState.playerFaction && GameState.factionsInfo[GameState.playerFaction]) {
-        GameState.factionsInfo[GameState.playerFaction].gold -= amount;
-    } else {
-        GameState.gold -= amount;
-    }
-};
+window.getGold = function() { return (GameState.playerFaction && GameState.factionsInfo[GameState.playerFaction]) ? GameState.factionsInfo[GameState.playerFaction].gold : 0; };
+window.useGold = function(amount) { if (GameState.playerFaction && GameState.factionsInfo[GameState.playerFaction]) GameState.factionsInfo[GameState.playerFaction].gold -= amount; };
+window.getFood = function() { return (GameState.playerFaction && GameState.factionsInfo[GameState.playerFaction]) ? GameState.factionsInfo[GameState.playerFaction].food : 0; };
+window.useFood = function(amount) { if (GameState.playerFaction && GameState.factionsInfo[GameState.playerFaction]) GameState.factionsInfo[GameState.playerFaction].food -= amount; };
 
 document.addEventListener('keydown', function(event) {
     if (event.target.tagName.toLowerCase() === 'input') return;
@@ -120,38 +120,23 @@ function findShortestPath(startId, endId) {
     let distances = {}; let prev = {}; let pq = [];
     window.rawNodes.forEach(n => { distances[n.id] = Infinity; prev[n.id] = null; });
     distances[startId] = 0; pq.push({ id: startId, cost: 0 });
-
     while (pq.length > 0) {
-        pq.sort((a, b) => a.cost - b.cost);
-        let current = pq.shift();
-        if (current.id === endId) break;
-        if (current.cost > distances[current.id]) continue;
-
+        pq.sort((a, b) => a.cost - b.cost); let current = pq.shift();
+        if (current.id === endId) break; if (current.cost > distances[current.id]) continue;
         window.graph[current.id].forEach(neighbor => {
             let alt = distances[current.id] + neighbor.cost;
-            if (alt < distances[neighbor.to]) {
-                distances[neighbor.to] = alt;
-                prev[neighbor.to] = { id: current.id, dist: neighbor.dist, speedMod: neighbor.speedMod };
-                pq.push({ id: neighbor.to, cost: alt });
-            }
+            if (alt < distances[neighbor.to]) { distances[neighbor.to] = alt; prev[neighbor.to] = { id: current.id, dist: neighbor.dist, speedMod: neighbor.speedMod }; pq.push({ id: neighbor.to, cost: alt }); }
         });
     }
     if (distances[endId] === Infinity) return null;
     let path = []; let curr = endId;
-    while (curr !== startId) {
-        let p = prev[curr];
-        path.unshift({ nodeId: curr, dist: p.dist, speedMod: p.speedMod });
-        curr = p.id;
-    }
+    while (curr !== startId) { let p = prev[curr]; path.unshift({ nodeId: curr, dist: p.dist, speedMod: p.speedMod }); curr = p.id; }
     return path;
 }
 
 function getClosestNode(latlng) {
     let minD = Infinity; let closest = null;
-    window.rawNodes.forEach(n => {
-        let d = map.distance(latlng, L.latLng(n.lat, n.lng));
-        if (d < minD) { minD = d; closest = n; }
-    });
+    window.rawNodes.forEach(n => { let d = map.distance(latlng, L.latLng(n.lat, n.lng)); if (d < minD) { minD = d; closest = n; } });
     return closest;
 }
 
@@ -162,7 +147,6 @@ map.on('contextmenu', (e) => {
     if (selection.type !== 'army') return;
     const army = GameState.armies.find(a => a.id === selection.id);
     if (!army || GameState.playerFaction === null || army.faction !== GameState.playerFaction) return;
-
     const closestCastle = getClosestNode(e.latlng);
     const distToCastle = map.distance(e.latlng, L.latLng(closestCastle.lat, closestCastle.lng));
     if (closestCastle && closestCastle.type !== "5" && closestCastle.type !== "0" && distToCastle < 5000) {
@@ -186,11 +170,12 @@ window.handleArmyClick = function(armyId, e) {
 window.deployArmy = function(castleId = null, deployAmount = null, isAI = false) {
     const cId = castleId || selection.id; const castle = GameState.castles[cId]; if (!castle) return;
     const amount = deployAmount || parseInt(document.getElementById('deploy-amount').value);
-    
     if (isNaN(amount) || amount <= 0 || amount > castle.troops) return;
-    if (!isAI && getGold() < 50) { alert("出陣には軍資金50が必要です。"); return; }
+    
+    let cost = Math.floor(50 * GameState.priceIndex);
+    if (!isAI && getGold() < cost) { alert(`出陣には軍資金 ${cost} が必要です。`); return; }
 
-    if(!isAI) useGold(50);
+    if(!isAI) useGold(cost);
     castle.troops -= amount;
     const nodeDef = window.rawNodes.find(n => n.id === cId);
 
@@ -199,50 +184,42 @@ window.deployArmy = function(castleId = null, deployAmount = null, isAI = false)
         pos: { lat: nodeDef.lat, lng: nodeDef.lng }, pathQueue: [], targetNodeId: null
     };
     GameState.armies.push(army);
-    
     if(!isAI) { selection = { type: 'army', id: army.id }; updateUI(); drawMap(); }
     return army;
 };
 
+// 🌟 工期システムに対応したコマンド実行
 window.executeCommand = function(cmd) {
     if (selection.type !== 'castle') return;
     const castle = GameState.castles[selection.id];
-    
-    if (cmd === 'agriculture') {
-        if (getGold() < 50) return;
-        useGold(50); castle.currentKokudaka += 2000; castle.loyalty = Math.min(100, castle.loyalty + 5);
-        gameEngine.log(`【開墾】${castle.name} の石高が上がり、民忠が回復しました。`);
-    } else if (cmd === 'commerce') {
-        if (getGold() < 50) return;
-        useGold(50); castle.commerce += 50; castle.loyalty = Math.min(100, castle.loyalty + 5);
-        gameEngine.log(`【投資】${castle.name} の商業が上がり、民忠が回復しました。`);
-    } else if (cmd === 'repair') {
-        // 修繕（安価なHP回復）
-        let cost = (castle.type==="1") ? 100 : ((castle.type==="3"||castle.type==="4") ? 20 : 50);
-        if (getGold() < cost) { alert(`資金が足りません。(必要: ${cost})`); return; }
-        if (castle.siegeHP >= castle.maxSiegeHP) { alert(`城壁は既に最大です。`); return; }
-        useGold(cost); 
-        castle.siegeHP = castle.maxSiegeHP;
-        gameEngine.log(`【修繕】${castle.name} の城壁を完全に修復しました。`);
-    } else if (cmd === 'defense') {
-        // 改修（高価な最大HP増加）
-        let cost = (castle.type==="1") ? 200 : ((castle.type==="3"||castle.type==="4") ? 50 : 100);
-        if (getGold() < cost) { alert(`資金が足りません。(必要: ${cost})`); return; }
-        useGold(cost); 
-        castle.defense += 20;
-        let hpMult = (castle.type==="1")? 15 : ((castle.type==="3")? 3 : ((castle.type==="4")? 5 : 10));
-        castle.maxSiegeHP = castle.defense * hpMult; 
-        castle.siegeHP = castle.maxSiegeHP; // 最大値が増えるとともに全快する
-        gameEngine.log(`【改修】${castle.name} を本格改修し、最大耐久度が上昇しました。`);
-    } else if (cmd === 'conscript') {
-        if (getGold() < 100) return;
+    let pIdx = GameState.priceIndex;
+
+    if (cmd === 'conscript') {
+        let gCost = Math.floor(100 * pIdx); let fCost = Math.floor(50 * pIdx);
+        if (getGold() < gCost || getFood() < fCost) { alert(`資源不足。金${gCost}、兵糧${fCost} 必要です。`); return; }
         const maxT = getMaxTroops(castle);
-        if (castle.troops >= maxT) { alert("上限です。"); return; }
-        useGold(100); 
+        if (castle.troops >= maxT) { alert("兵力は上限です。"); return; }
+        useGold(gCost); useFood(fCost);
         castle.troops = Math.min(maxT, castle.troops + 300);
-        castle.loyalty = Math.max(0, castle.loyalty - 10); // 臨時徴兵で民忠低下
-        gameEngine.log(`【徴兵】${castle.name} で徴兵を行いましたが、民忠が低下しました。`);
+        castle.loyalty = Math.max(0, castle.loyalty - 10);
+        gameEngine.log(`【徴兵】${castle.name} で徴兵を行いました。(民忠低下)`);
+        updateUI(); drawMap();
+        return;
     }
+
+    if (GameState.tasks.some(t => t.castleId === castle.id)) { alert("この城は現在工事中です。"); return; }
+
+    let baseCost = 25, days = 30;
+    if(cmd === 'repair') { baseCost = 25; days = 15; if (castle.siegeHP >= castle.maxSiegeHP) { alert(`城壁は無傷です。`); return; } }
+    if(cmd === 'defense') { baseCost = 100; days = 45; }
+
+    let cost = Math.floor(baseCost * pIdx);
+    if (getGold() < cost) { alert(`着工金が足りません。(必要: ${cost})`); return; }
+    
+    useGold(cost); 
+    GameState.tasks.push({ type: cmd, castleId: castle.id, faction: castle.faction, daysLeft: days, finishCost: cost });
+    gameEngine.log(`【着工】${castle.name} で工事を開始しました。(工期: ${days}日)`);
+    
     updateUI(); drawMap();
 }
 
@@ -279,7 +256,6 @@ function drawMap() {
 
         const isMain = (castle.type === "1");
         const sizeClass = isMain ? "castle-main" : "castle-sub";
-        
         const fColor = FactionMaster[castle.faction]?.color || "#000";
         const isFlash = castle._flash ? "castle-flash" : "";
         const shadowStyle = (selection.type === 'castle' && selection.id === n.id) ? `box-shadow: 0 0 15px 5px ${fColor};` : '';
@@ -288,10 +264,7 @@ function drawMap() {
                          <div class="node-label" style="color:${fColor === '#95a5a6' ? '#2c3e50' : fColor}">${castle.name}</div>
                          <div class="troop-badge">${castle.troops}</div>`;
                          
-        const marker = L.marker([n.lat, n.lng], { 
-            icon: L.divIcon({ className: `node-marker ${sizeClass}`, html: htmlStr, iconSize: [0, 0] }) 
-        }).addTo(nodeLayer);
-        
+        const marker = L.marker([n.lat, n.lng], { icon: L.divIcon({ className: `node-marker ${sizeClass}`, html: htmlStr, iconSize: [0, 0] }) }).addTo(nodeLayer);
         marker.on('click', (e) => handleNodeLeftClick(n.id, e));
         window.castleMarkers[n.id] = marker;
         castle._flash = false; 
@@ -327,6 +300,7 @@ function updateUI() {
     if (GameState.hasStarted) {
         document.getElementById('ui-date').innerText = `${GameState.year}年 ${GameState.month}月 ${GameState.day}日`;
         document.getElementById('ui-gold').innerText = getGold();
+        document.getElementById('ui-food').innerText = getFood();
         
         let seasonStr = "🌸春", seasonClass = "season-spring";
         if(GameState.month >= 6 && GameState.month <= 8) { seasonStr = "🍉夏"; seasonClass = "season-summer"; }
@@ -342,10 +316,8 @@ function updateUI() {
 function updateRanking() {
     const stats = {};
     Object.keys(FactionMaster).forEach(k => { if(k !== 'independent') stats[k] = { id: k, castles: 0, troops: 0 }; });
-
     Object.values(GameState.castles).forEach(c => { if (stats[c.faction]) { stats[c.faction].castles++; stats[c.faction].troops += c.troops; } });
     GameState.armies.forEach(a => { if (stats[a.faction]) stats[a.faction].troops += a.troops; });
-
     const sortedList = Object.values(stats).filter(s => s.castles > 0).sort((a, b) => b.castles - a.castles);
 
     let html = '';
@@ -399,15 +371,16 @@ function updateRightPanel() {
         const isPlayer = GameState.playerFaction !== null && castle.faction === GameState.playerFaction;
         const maxT = getMaxTroops(castle);
         
-        let repCost = (castle.type==="1") ? 100 : ((castle.type==="3"||castle.type==="4") ? 20 : 50);
-        let defCost = (castle.type==="1") ? 200 : ((castle.type==="3"||castle.type==="4") ? 50 : 100);
+        let pIdx = GameState.priceIndex;
+        let isTask = GameState.tasks.find(t => t.castleId === castle.id);
+        let badgeHtml = isTask ? `<span class="construction-badge">🚧 工事中 (残${isTask.daysLeft}日)</span>` : '';
 
         panel.innerHTML = `
             <div class="panel-section" style="border-top: 4px solid ${factionData.color};">
-                <div style="font-size: 16px; font-weight: bold; margin-bottom: 5px;">${castle.name} <span style="font-size:12px; color:#7f8c8d; font-weight:normal;">(${castle.nodeTypeName})</span></div>
+                <div style="font-size: 16px; font-weight: bold; margin-bottom: 5px;">${castle.name} ${badgeHtml} <span style="font-size:12px; color:#7f8c8d; font-weight:normal;">(${castle.nodeTypeName})</span></div>
                 <div class="data-row"><span>支配:</span> <b style="color:${factionData.color};">${factionData.name}</b></div>
-                <div class="data-row"><span>石高 (農業):</span> <b style="color:#d35400;">${castle.currentKokudaka}</b></div>
-                <div class="data-row"><span>商業 (資金):</span> <b style="color:#f39c12;">${castle.commerce}</b></div>
+                <div class="data-row"><span>石高 (秋の年貢):</span> <b style="color:#d35400;">${castle.currentKokudaka}</b></div>
+                <div class="data-row"><span>商業 (毎月の金):</span> <b style="color:#f39c12;">${castle.commerce}</b></div>
                 <div class="data-row"><span>耐久度 (城壁):</span> <b style="${castle.siegeHP===0 ? 'color:#e74c3c;' : 'color:#3498db;'}">${Math.ceil(castle.siegeHP)} / ${castle.maxSiegeHP}</b></div>
                 <div class="data-row"><span>守備兵力:</span> <b>${castle.troops}</b> (上限 ${maxT})</div>
                 <div class="data-row"><span>民の忠誠:</span> <b style="${castle.loyalty < 50 ? 'color:#e74c3c;' : 'color:#27ae60;'}">${castle.loyalty}</b></div>
@@ -418,17 +391,17 @@ function updateRightPanel() {
             <div class="panel-section" style="background-color: #fdf2e9;">
                 <div style="font-weight: bold; margin-bottom: 5px; font-size: 13px;">⚔️ 出陣</div>
                 <input type="number" id="deploy-amount" value="${Math.floor(castle.troops * 0.5)}" max="${castle.troops}">
-                <button class="action-btn" onclick="deployArmy()">出撃 (金50)</button>
+                <button class="action-btn" onclick="deployArmy()">出撃 (金${Math.floor(50*pIdx)})</button>
             </div>
             <div class="panel-section">
-                <div style="font-weight: bold; margin-bottom: 5px; font-size: 13px;">🛠️ 内政・軍事</div>
-                <button class="cmd-btn action-btn" onclick="executeCommand('agriculture')">🌾 開墾 (金50)</button>
-                <button class="cmd-btn action-btn" onclick="executeCommand('commerce')">💰 市の保護 (金50)</button>
+                <div style="font-weight: bold; margin-bottom: 5px; font-size: 13px;">🛠️ 内政・軍事 (着工金/完了金)</div>
+                <button class="cmd-btn action-btn" onclick="executeCommand('agriculture')">🌾 開墾 (金${Math.floor(25*pIdx)} / 30日)</button>
+                <button class="cmd-btn action-btn" onclick="executeCommand('commerce')">💰 商い (金${Math.floor(25*pIdx)} / 30日)</button>
                 <div style="display:flex; gap:5px;">
-                    <button class="cmd-btn action-btn" onclick="executeCommand('repair')" style="flex:1;">🔨 修繕(金${repCost})</button>
-                    <button class="cmd-btn action-btn" onclick="executeCommand('defense')" style="flex:1;">🏯 改修(金${defCost})</button>
+                    <button class="cmd-btn action-btn" onclick="executeCommand('repair')" style="flex:1;">🔨 修繕(金${Math.floor(25*pIdx)}/15日)</button>
+                    <button class="cmd-btn action-btn" onclick="executeCommand('defense')" style="flex:1;">🏯 改修(金${Math.floor(100*pIdx)}/45日)</button>
                 </div>
-                <button class="cmd-btn action-btn" onclick="executeCommand('conscript')" style="background-color:#c0392b;">🗣️ 臨時徴兵 (金100 / 民忠低下)</button>
+                <button class="cmd-btn action-btn" onclick="executeCommand('conscript')" style="background-color:#c0392b;">🗣️ 臨時徴兵 (即時：金${Math.floor(100*pIdx)}/糧${Math.floor(50*pIdx)})</button>
             </div>` : ''}` + guideHtml;
     }
 }
@@ -467,7 +440,6 @@ window.updateSpeedDisplay = function() {
     document.getElementById('speedDisplay').innerText = (val / 1000).toFixed(2) + "秒";
 };
 
-// 統計モーダル（諸大名帳）
 window.toggleStatsModal = function() {
     if(!GameState.hasStarted) return;
     const modal = document.getElementById('stats-modal');
@@ -496,17 +468,17 @@ function buildStatsTable() {
     });
     
     GameState.armies.forEach(a => { if (stats[a.faction]) stats[a.faction].troops += a.troops; });
-
     const sortedList = Object.values(stats).filter(s => s.totalCastles > 0).sort((a, b) => b.koku - a.koku);
 
     let html = `<table class="stats-table">
         <thead><tr>
-            <th>勢力名</th><th>外交関係 (同盟)</th><th>貯蓄 (軍資金)</th><th>拠点数 (本/支/町/港)</th><th>総石高 (秋の年貢)</th><th>総兵力</th>
+            <th>勢力名</th><th>外交関係 (同盟)</th><th>金 / 兵糧</th><th>拠点数 (本/支/町/港)</th><th>総石高 (秋の年貢)</th><th>総兵力</th>
         </tr></thead><tbody>`;
 
     sortedList.forEach(s => {
         const fac = FactionMaster[s.id];
         let gold = GameState.factionsInfo[s.id]?.gold || 0;
+        let food = GameState.factionsInfo[s.id]?.food || 0;
         
         let allies = [];
         Object.keys(FactionMaster).forEach(other => {
@@ -519,7 +491,7 @@ function buildStatsTable() {
         html += `<tr>
             <td style="font-weight:bold;"><span class="rank-color" style="background-color:${fac.color};"></span>${fac.name}</td>
             <td style="font-size:11px;">${allyStr}</td>
-            <td style="color:#f39c12; font-weight:bold;">${gold}</td>
+            <td><b style="color:#f39c12;">${gold}</b> / <b style="color:#27ae60;">${food}</b></td>
             <td><b>${s.totalCastles}</b> <span style="font-size:10px; color:#7f8c8d;">(${s.mainC}/${s.subC}/${s.townC}/${s.portC})</span></td>
             <td style="color:#d35400;">${s.koku}</td>
             <td>${s.troops}</td>
