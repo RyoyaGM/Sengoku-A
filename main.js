@@ -237,12 +237,15 @@ function drawMap() {
         }
     }
 
+    // 🌟 マーカーのサイズと中心アンカーをここで厳密に定義
     window.rawNodes.forEach(n => {
         if (n.type === "5" || n.type === "0") return; 
         const castle = GameState.castles[n.id]; if(!castle) return;
 
         const isMain = (castle.type === "1");
-        const sizeClass = isMain ? "castle-main" : "castle-sub";
+        const iconW = isMain ? 28 : 20; 
+        const iconH = isMain ? 28 : 20; 
+        
         const fColor = FactionMaster[castle.faction]?.color || "#000";
         const hpPct = Math.max(0, (castle.siegeHP / castle.maxSiegeHP) * 100);
         const ringColor = hpPct > 50 ? '#2ecc71' : (hpPct > 25 ? '#f1c40f' : '#e74c3c');
@@ -256,9 +259,10 @@ function drawMap() {
                          
         const marker = L.marker([n.lat, n.lng], { 
             icon: L.divIcon({ 
-                className: `node-marker ${sizeClass}`, 
+                className: `node-marker`, // CSS側のサイズ指定クラスを完全に削除
                 html: htmlStr, 
-                iconSize: [0, 0] // 最も安定するサイズ0指定に戻しました
+                iconSize: [iconW, iconH],      // 🌟絶対サイズ
+                iconAnchor: [iconW/2, iconH/2] // 🌟絶対中心点
             }) 
         }).addTo(nodeLayer);
         
@@ -273,14 +277,16 @@ function drawMap() {
         const factionColor = FactionMaster[army.faction]?.color || "#000";
         const shadowStyle = isSelected ? `box-shadow: 0 0 10px 4px #f1c40f;` : '';
 
-        const htmlStr = `<div style="background-color: ${factionColor}; width:100%; height:100%; border-radius:50%; display:flex; align-items:center; justify-content:center; ${shadowStyle}">⚔️</div>
+        // 部隊アイコンのHTML構造も純粋化
+        const htmlStr = `<div style="background-color: ${factionColor}; width:100%; height:100%; border-radius:50%; display:flex; align-items:center; justify-content:center; box-sizing:border-box; border: 2px solid white; font-size:14px; ${shadowStyle}">⚔️</div>
                          <div class="army-troops-label" style="position:absolute; top:-12px; left:50%; transform:translateX(-50%); font-weight:bold; color:#1a252f; text-shadow:1px 1px 0 #fff,-1px -1px 0 #fff; white-space:nowrap;">${army.troops}</div>`;
         
         const marker = L.marker([army.pos.lat, army.pos.lng], { 
             icon: L.divIcon({ 
                 className: 'army-marker', 
                 html: htmlStr, 
-                iconSize: [0, 0] // 最も安定するサイズ0指定に戻しました
+                iconSize: [24, 24],   // 🌟絶対サイズ
+                iconAnchor: [12, 12]  // 🌟絶対中心点
             }), 
             zIndexOffset: 1000 
         }).addTo(armyLayer);
