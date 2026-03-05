@@ -16,7 +16,7 @@ document.getElementById('mapLoader').addEventListener('change', function(e) {
 function loadMapData(mapData) {
     window.rawNodes = mapData.nodes || []; window.rawEdges = mapData.edges || [];
     GameState.castles = {}; GameState.armies = []; GameState.alliances = new Set(); GameState.hateMatrix = {};
-    GameState.factionsInfo = {}; // AIを含む全勢力の資金などを管理
+    GameState.factionsInfo = {}; 
     buildGraph();
 
     window.rawNodes.forEach(n => {
@@ -29,7 +29,8 @@ function loadMapData(mapData) {
 
             let castleObj = {
                 id: n.id, name: n.name, type: n.type, nodeTypeName: typeName, faction: "independent",
-                currentKokudaka: 5000, commerce: 100 * comMult, defense: 100, troops: 0
+                currentKokudaka: 5000, commerce: 100 * comMult, defense: 100, troops: 0,
+                loyalty: 100 // 民忠の追加
             };
             castleObj.troops = getMaxTroops(castleObj);
             castleObj.maxSiegeHP = castleObj.defense * hpMult;
@@ -57,7 +58,6 @@ function loadScenarioData(scenarioData) {
     document.getElementById('overlay-start').style.display = 'none';
     if(scenarioData.factions) FactionMaster = { ...FactionMaster, ...scenarioData.factions };
 
-    // 全勢力に初期資金(3000)を配る
     Object.keys(FactionMaster).forEach(f => {
         GameState.factionsInfo[f] = { gold: 3000 };
     });
@@ -79,7 +79,6 @@ function loadScenarioData(scenarioData) {
     updateUI(); drawMap();
 }
 
-// 資金取得のヘルパー関数（プレイヤー未選択時はGameState.goldを参照）
 window.getGold = function() {
     if (GameState.playerFaction && GameState.factionsInfo[GameState.playerFaction]) {
         return GameState.factionsInfo[GameState.playerFaction].gold;
@@ -211,24 +210,38 @@ window.executeCommand = function(cmd) {
     
     if (cmd === 'agriculture') {
         if (getGold() < 50) return;
-        useGold(50); castle.currentKokudaka += 2000; gameEngine.log(`【開墾】${castle.name} の石高が上がりました。`);
+        useGold(50); castle.currentKokudaka += 2000; castle.loyalty = Math.min(100, castle.loyalty + 5);
+        gameEngine.log(`【開墾】${castle.name} の石高が上がり、民忠が回復しました。`);
     } else if (cmd === 'commerce') {
         if (getGold() < 50) return;
-        useGold(50); castle.commerce += 50; gameEngine.log(`【投資】${castle.name} の商業が上がりました。`);
+        useGold(50); castle.commerce += 50; castle.loyalty = Math.min(100, castle.loyalty + 5);
+        gameEngine.log(`【投資】${castle.name} の商業が上がり、民忠が回復しました。`);
+    } else if (cmd === 'repair') {
+        // 修繕（安価なHP回復）
+        let cost = (castle.type==="1") ? 100 : ((castle.type==="3"||castle.type==="4") ? 20 : 50);
+        if (getGold() < cost) { alert(`資金が足りません。(必要: ${cost})`); return; }
+        if (castle.siegeHP >= castle.maxSiegeHP) { alert(`城壁は既に最大です。`); return; }
+        useGold(cost); 
+        castle.siegeHP = castle.maxSiegeHP;
+        gameEngine.log(`【修繕】${castle.name} の城壁を完全に修復しました。`);
     } else if (cmd === 'defense') {
-        // 改修コストの計算（本城200, 支城100, その他50）
+        // 改修（高価な最大HP増加）
         let cost = (castle.type==="1") ? 200 : ((castle.type==="3"||castle.type==="4") ? 50 : 100);
         if (getGold() < cost) { alert(`資金が足りません。(必要: ${cost})`); return; }
         useGold(cost); 
-        
-        let heal = (castle.type==="3"||castle.type==="4") ? castle.maxSiegeHP : castle.maxSiegeHP * 0.5;
-        castle.siegeHP = Math.min(castle.maxSiegeHP, castle.siegeHP + heal);
-        gameEngine.log(`【改修】${castle.name} を修繕し、耐久度を回復させました。`);
+        castle.defense += 20;
+        let hpMult = (castle.type==="1")? 15 : ((castle.type==="3")? 3 : ((castle.type==="4")? 5 : 10));
+        castle.maxSiegeHP = castle.defense * hpMult; 
+        castle.siegeHP = castle.maxSiegeHP; // 最大値が増えるとともに全快する
+        gameEngine.log(`【改修】${castle.name} を本格改修し、最大耐久度が上昇しました。`);
     } else if (cmd === 'conscript') {
         if (getGold() < 100) return;
         const maxT = getMaxTroops(castle);
         if (castle.troops >= maxT) { alert("上限です。"); return; }
-        useGold(100); castle.troops = Math.min(maxT, castle.troops + 300);
+        useGold(100); 
+        castle.troops = Math.min(maxT, castle.troops + 300);
+        castle.loyalty = Math.max(0, castle.loyalty - 10); // 臨時徴兵で民忠低下
+        gameEngine.log(`【徴兵】${castle.name} で徴兵を行いましたが、民忠が低下しました。`);
     }
     updateUI(); drawMap();
 }
@@ -271,7 +284,6 @@ function drawMap() {
         const isFlash = castle._flash ? "castle-flash" : "";
         const shadowStyle = (selection.type === 'castle' && selection.id === n.id) ? `box-shadow: 0 0 15px 5px ${fColor};` : '';
         
-        // （円形ゲージは後で実装するため今回は除外。以前の安定版に合わせる）
         const htmlStr = `<div style="background-color:${fColor}; width:100%; height:100%; border-radius:50%; box-sizing: border-box; ${shadowStyle}" class="${isFlash}"></div>
                          <div class="node-label" style="color:${fColor === '#95a5a6' ? '#2c3e50' : fColor}">${castle.name}</div>
                          <div class="troop-badge">${castle.troops}</div>`;
@@ -387,7 +399,8 @@ function updateRightPanel() {
         const isPlayer = GameState.playerFaction !== null && castle.faction === GameState.playerFaction;
         const maxT = getMaxTroops(castle);
         
-        let repCost = (castle.type==="1") ? 200 : ((castle.type==="3"||castle.type==="4") ? 50 : 100);
+        let repCost = (castle.type==="1") ? 100 : ((castle.type==="3"||castle.type==="4") ? 20 : 50);
+        let defCost = (castle.type==="1") ? 200 : ((castle.type==="3"||castle.type==="4") ? 50 : 100);
 
         panel.innerHTML = `
             <div class="panel-section" style="border-top: 4px solid ${factionData.color};">
@@ -397,6 +410,7 @@ function updateRightPanel() {
                 <div class="data-row"><span>商業 (資金):</span> <b style="color:#f39c12;">${castle.commerce}</b></div>
                 <div class="data-row"><span>耐久度 (城壁):</span> <b style="${castle.siegeHP===0 ? 'color:#e74c3c;' : 'color:#3498db;'}">${Math.ceil(castle.siegeHP)} / ${castle.maxSiegeHP}</b></div>
                 <div class="data-row"><span>守備兵力:</span> <b>${castle.troops}</b> (上限 ${maxT})</div>
+                <div class="data-row"><span>民の忠誠:</span> <b style="${castle.loyalty < 50 ? 'color:#e74c3c;' : 'color:#27ae60;'}">${castle.loyalty}</b></div>
             </div>
             ${GameState.playerFaction === null && castle.faction !== "independent" ? `
             <div class="panel-section"><button class="action-btn" onclick="playAsFaction('${castle.faction}')" style="background-color: #e67e22; font-weight:bold;">🎌 この大名でプレイする</button></div>` : ''}
@@ -410,8 +424,11 @@ function updateRightPanel() {
                 <div style="font-weight: bold; margin-bottom: 5px; font-size: 13px;">🛠️ 内政・軍事</div>
                 <button class="cmd-btn action-btn" onclick="executeCommand('agriculture')">🌾 開墾 (金50)</button>
                 <button class="cmd-btn action-btn" onclick="executeCommand('commerce')">💰 市の保護 (金50)</button>
-                <button class="cmd-btn action-btn" onclick="executeCommand('defense')">🏯 城郭改修 (金${repCost})</button>
-                <button class="cmd-btn action-btn" onclick="executeCommand('conscript')">🗣️ 臨時徴兵 (金100)</button>
+                <div style="display:flex; gap:5px;">
+                    <button class="cmd-btn action-btn" onclick="executeCommand('repair')" style="flex:1;">🔨 修繕(金${repCost})</button>
+                    <button class="cmd-btn action-btn" onclick="executeCommand('defense')" style="flex:1;">🏯 改修(金${defCost})</button>
+                </div>
+                <button class="cmd-btn action-btn" onclick="executeCommand('conscript')" style="background-color:#c0392b;">🗣️ 臨時徴兵 (金100 / 民忠低下)</button>
             </div>` : ''}` + guideHtml;
     }
 }
@@ -450,14 +467,14 @@ window.updateSpeedDisplay = function() {
     document.getElementById('speedDisplay').innerText = (val / 1000).toFixed(2) + "秒";
 };
 
-// 🌟 統計モーダル（諸大名帳）の開閉とテーブル構築
+// 統計モーダル（諸大名帳）
 window.toggleStatsModal = function() {
     if(!GameState.hasStarted) return;
     const modal = document.getElementById('stats-modal');
     if (modal.classList.contains('modal-hidden')) {
         buildStatsTable();
         modal.classList.remove('modal-hidden');
-        if (!GameState.isPaused) gameEngine.toggleTime(); // 開いたときは一時停止する
+        if (!GameState.isPaused) gameEngine.toggleTime();
     } else {
         modal.classList.add('modal-hidden');
     }
