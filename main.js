@@ -244,24 +244,25 @@ function drawMap() {
         }
     }
 
-    // 🌟 マーカーのサイズと中心座標をLeafletに正しく伝える
     window.rawNodes.forEach(n => {
         if (n.type === "5" || n.type === "0") return; 
         const castle = GameState.castles[n.id]; if(!castle) return;
 
         const isMain = (castle.type === "1");
         const sizeClass = isMain ? "castle-main" : "castle-sub";
-        const iconW = isMain ? 28 : 20; // ピクセル幅
-        const iconH = isMain ? 28 : 20; // ピクセル高さ
+        const iconW = isMain ? 28 : 20; 
+        const iconH = isMain ? 28 : 20; 
         
         const fColor = FactionMaster[castle.faction]?.color || "#000";
         const hpPct = Math.max(0, (castle.siegeHP / castle.maxSiegeHP) * 100);
         const ringColor = hpPct > 50 ? '#2ecc71' : (hpPct > 25 ? '#f1c40f' : '#e74c3c');
         const isFlash = castle._flash ? "castle-flash" : "";
+        const shadowStyle = (selection.type === 'castle' && selection.id === n.id) ? `box-shadow: 0 0 15px 5px ${fColor};` : '';
         
-        const htmlStr = `<div style="position:relative; width:100%; height:100%;">
+        // 🌟 マーカーの中身（marker-core）をラップして、ここだけを縮小・装飾の対象にする
+        const htmlStr = `<div class="marker-core" style="position:relative; width:100%; height:100%; transition: transform 0.2s; transform-origin: center center;">
                             <div class="hp-ring-container"><div class="hp-ring" style="background: conic-gradient(${ringColor} ${hpPct}%, transparent 0);"></div></div>
-                            <div style="background-color:${fColor}; width:100%; height:100%; border-radius:50%;" class="${isFlash}"></div>
+                            <div style="background-color:${fColor}; width:100%; height:100%; border-radius:50%; box-sizing: border-box; ${shadowStyle}" class="${isFlash}"></div>
                          </div>
                          <div class="node-label" style="color:${fColor === '#95a5a6' ? '#2c3e50' : fColor}">${castle.name}</div>
                          <div class="troop-badge">${castle.troops}</div>`;
@@ -270,12 +271,11 @@ function drawMap() {
             icon: L.divIcon({ 
                 className: `node-marker ${sizeClass}`, 
                 html: htmlStr, 
-                iconSize: [iconW, iconH],      // 🌟正しいサイズを指定
-                iconAnchor: [iconW/2, iconH/2] // 🌟中央を基準点に指定
+                iconSize: [iconW, iconH],      
+                iconAnchor: [iconW/2, iconH/2] 
             }) 
         }).addTo(nodeLayer);
         
-        if (selection.type === 'castle' && selection.id === n.id) marker.getElement().style.boxShadow = `0 0 15px 5px ${fColor}`;
         marker.on('click', (e) => handleNodeLeftClick(n.id, e));
         window.castleMarkers[n.id] = marker;
         castle._flash = false; 
@@ -285,21 +285,21 @@ function drawMap() {
         if (army.troops <= 0) return;
         const isSelected = (selection.type === 'army' && selection.id === army.id);
         const factionColor = FactionMaster[army.faction]?.color || "#000";
+        const shadowStyle = isSelected ? `box-shadow: 0 0 10px 4px #f1c40f;` : '';
 
-        const htmlStr = `⚔️<div class="army-troops-label" style="position:absolute; top:-12px; font-weight:bold; color:#1a252f; text-shadow:1px 1px 0 #fff,-1px -1px 0 #fff; white-space:nowrap;">${army.troops}</div>`;
+        // 🌟 部隊マーカーも中身（army-core）をラップして、色や枠線は全て内側で描画する
+        const htmlStr = `<div class="army-core" style="background-color: ${factionColor}; ${shadowStyle}">⚔️</div>
+                         <div class="army-troops-label" style="position:absolute; top:-12px; left:50%; transform:translateX(-50%); font-weight:bold; color:#1a252f; text-shadow:1px 1px 0 #fff,-1px -1px 0 #fff; white-space:nowrap;">${army.troops}</div>`;
         
         const marker = L.marker([army.pos.lat, army.pos.lng], { 
             icon: L.divIcon({ 
                 className: 'army-marker', 
                 html: htmlStr, 
-                iconSize: [24, 24],   // 🌟正しいサイズを指定
-                iconAnchor: [12, 12]  // 🌟中央を基準点に指定
+                iconSize: [24, 24],   
+                iconAnchor: [12, 12]  
             }), 
             zIndexOffset: 1000 
         }).addTo(armyLayer);
-        
-        marker.getElement().style.backgroundColor = factionColor;
-        if(isSelected) marker.getElement().style.boxShadow = '0 0 10px 4px #f1c40f';
         
         window.armyMarkers[army.id] = marker; 
         marker.on('click', (e) => handleArmyClick(army.id, e));
