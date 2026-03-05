@@ -1,7 +1,7 @@
 // --- engine.js: ゲームの状態管理と、ターン進行・AI・戦闘ロジック ---
 
 const GameState = {
-    isLoaded: false, hasStarted: false, isPaused: true, isAutoWatch: false,
+    isLoaded: false, hasStarted: false, isPaused: true,
     year: 1560, month: 1, day: 1, gold: 3000, castles: {}, armies: [], armyIdCounter: 1,
     playerFaction: null // プレイヤーがどの大名かを管理
 };
@@ -108,9 +108,9 @@ const gameEngine = {
                         army.troops = Math.floor(army.troops * 0.8); castle.troops = 0;
                         this.log(`<span class="log-combat">🎊 ${FactionMaster[army.faction].name}が ${castle.name} を落としました！</span>`);
                         
-                        // 自勢力に関わる合戦で、自動観戦モードでなければ一時停止
+                        // 自勢力に関わる合戦の場合は自動で一時停止
                         const isPlayerInvolved = GameState.playerFaction !== null && (GameState.castles[node.id].faction === GameState.playerFaction || army.faction === GameState.playerFaction);
-                        if(!GameState.isAutoWatch && isPlayerInvolved) {
+                        if(isPlayerInvolved) {
                             if(!GameState.isPaused) this.toggleTime();
                         }
                     } else {
@@ -138,7 +138,7 @@ const gameEngine = {
                         a1.pathQueue = []; a2.pathQueue = [];
                         
                         const isPlayerInvolvedWild = GameState.playerFaction !== null && (a1.faction === GameState.playerFaction || a2.faction === GameState.playerFaction);
-                        if(!GameState.isAutoWatch && isPlayerInvolvedWild) {
+                        if(isPlayerInvolvedWild) {
                             if(!GameState.isPaused) this.toggleTime();
                         }
                     }
