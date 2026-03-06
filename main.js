@@ -73,11 +73,11 @@ function loadScenarioData(scenarioData) {
     GameState.priceIndex = count > 0 ? (totalKoku / count) / 5000 : 1.0;
     if(GameState.priceIndex < 0.1) GameState.priceIndex = 0.1; 
 
-    // 初期物資の配布（城ごと）
+    // 🌟 初期備蓄の増加（石高の10倍）
     Object.values(GameState.castles).forEach(c => {
         if(c.faction !== "independent") {
             c.gold = Math.floor(1000 * GameState.priceIndex);
-            c.food = Math.floor(c.currentKokudaka * 2 * GameState.priceIndex);
+            c.food = Math.floor(c.currentKokudaka * 10 * GameState.priceIndex);
         }
     });
 
@@ -211,7 +211,8 @@ window.updateSurvivalDays = function() {
     document.getElementById('val-food').innerText = food;
     if (troops <= 0) document.getElementById('val-days').innerText = "--";
     else {
-        const daily = (troops / 100) * 3 * GameState.priceIndex;
+        // 表示上の予測値は通常の「味方領行軍(3.0)」を基準とする
+        const daily = (troops / 100) * 3.0 * GameState.priceIndex;
         document.getElementById('val-days').innerText = Math.floor(food / daily);
     }
 };
@@ -243,6 +244,15 @@ window.deployArmy = function(cIdParam = null, amountParam = null, isAI = false, 
 window.executeCommand = function(cmd) {
     if (selection.type !== 'castle') return;
     const castle = GameState.castles[selection.id];
+    const nDef = window.rawNodes.find(n => n.id === castle.id);
+
+    // 🌟 攻城中（包囲されている）かの判定
+    const isUnderSiege = GameState.armies.some(a => a.troops > 0 && !areAllies(a.faction, castle.faction) && map.distance(L.latLng(a.pos), L.latLng(nDef.lat, nDef.lng)) < 200);
+    if (isUnderSiege) {
+        alert("敵軍に包囲されているため、内政や普請は行えません！");
+        return;
+    }
+
     let pIdx = GameState.priceIndex;
     if (cmd === 'conscript') {
         let gC = Math.floor(100 * pIdx), fC = Math.floor(50 * pIdx);
@@ -353,6 +363,7 @@ window.disbandArmy = function(id) { const i = GameState.armies.findIndex(a => a.
 function updateRightPanel() {
     const p = document.getElementById('info-content');
     if (!selection.id) { p.innerHTML = `<p style="font-size:12px; color:#7f8c8d;">城や部隊を選択してください</p>`; return; }
+    
     if (selection.type === 'army') {
         const a = GameState.armies.find(x => x.id === selection.id); if(!a) return;
         const f = FactionMaster[a.faction]; let dN = '待機中';
@@ -363,12 +374,28 @@ function updateRightPanel() {
     } else {
         const c = GameState.castles[selection.id]; if(!c) return;
         const f = FactionMaster[c.faction]; const pIdx = GameState.priceIndex;
-        let dH = ''; if(c.faction===GameState.playerFaction) {
+        
+        // 🌟 攻城されているかのチェック
+        const nDef = window.rawNodes.find(n => n.id === c.id);
+        const isUnderSiege = GameState.armies.some(a => a.troops > 0 && !areAllies(a.faction, c.faction) && map.distance(L.latLng(a.pos), L.latLng(nDef.lat, nDef.lng)) < 200);
+
+        let dH = ''; 
+        if(c.faction===GameState.playerFaction) {
             let dT = Math.floor(c.troops*0.5), dG = Math.floor(c.gold*0.1), dF = Math.floor(c.food*0.5);
             let eD = (dT>0) ? Math.floor(dF / ((dT/100)*3*pIdx)) : "--";
             dH = `<div class="panel-section" style="background:#fdf2e9;"><b>隊の編成</b><br><div style="font-size:11px;">出陣兵: <span id="val-troops">${dT}</span><input type="range" id="deploy-amount" value="${dT}" max="${c.troops}" oninput="updateSurvivalDays()">持参金: <span id="val-gold">${dG}</span><input type="range" id="deploy-gold" value="${dG}" max="${c.gold}" oninput="updateSurvivalDays()">持参糧: <span id="val-food">${dF}</span><input type="range" id="deploy-food" value="${dF}" max="${c.food}" oninput="updateSurvivalDays()"></div><div style="font-size:11px; color:#d35400;">生存予測: <span id="val-days">${eD}</span> 日</div><div style="display:flex; gap:5px; margin-top:5px;"><button class="action-btn" onclick="deployArmy()">出撃</button><button class="action-btn" onclick="deployArmy(null,null,false,'transport')" style="background:#27ae60;">輸送</button></div></div>`;
         }
-        p.innerHTML = `<div class="panel-section" style="border-top:4px solid ${f.color};"><b>${c.name}</b><div class="data-row"><span>支配:</span> <b>${f.name}</b></div><div class="data-row"><span>蔵の金/糧:</span> <b>${c.gold} / ${c.food}</b></div><div class="data-row"><span>石高/商業:</span> <b>${c.currentKokudaka} / ${c.commerce}</b></div><div class="data-row"><span>城壁/兵力:</span> <b>${Math.ceil(c.siegeHP)} / ${c.troops}</b></div></div>` + (c.faction==='independent'&&GameState.playerFaction===null?`<button class="action-btn" onclick="playAsFaction('${c.faction}')">この大名で開始</button>`:dH) + (c.faction===GameState.playerFaction?`<div class="panel-section"><b>内政</b><button class="cmd-btn action-btn" onclick="executeCommand('agriculture')">開墾</button><button class="cmd-btn action-btn" onclick="executeCommand('commerce')">商い</button><button class="cmd-btn action-btn" onclick="executeCommand('conscript')">徴兵</button></div>`:'');
+
+        let domesticHtml = '';
+        if(c.faction===GameState.playerFaction) {
+            if(isUnderSiege) {
+                domesticHtml = `<div class="panel-section"><div style="color:#e74c3c; font-weight:bold; font-size:12px;">⚠️ 現在敵軍に包囲されています！<br>出陣以外の内政コマンドは実行できません。</div></div>`;
+            } else {
+                domesticHtml = `<div class="panel-section"><b>内政</b><button class="cmd-btn action-btn" onclick="executeCommand('agriculture')">開墾</button><button class="cmd-btn action-btn" onclick="executeCommand('commerce')">商い</button><button class="cmd-btn action-btn" onclick="executeCommand('conscript')">徴兵</button></div>`;
+            }
+        }
+
+        p.innerHTML = `<div class="panel-section" style="border-top:4px solid ${f.color};"><b>${c.name}</b><div class="data-row"><span>支配:</span> <b>${f.name}</b></div><div class="data-row"><span>蔵の金/糧:</span> <b>${c.gold} / ${c.food}</b></div><div class="data-row"><span>石高/商業:</span> <b>${c.currentKokudaka} / ${c.commerce}</b></div><div class="data-row"><span>城壁/兵力:</span> <b>${Math.ceil(c.siegeHP)} / ${c.troops}</b></div></div>` + (c.faction==='independent'&&GameState.playerFaction===null?`<button class="action-btn" onclick="playAsFaction('${c.faction}')">この大名で開始</button>`:dH) + domesticHtml;
     }
 }
 
