@@ -25,7 +25,6 @@ button:disabled { background-color: #95a5a6 !important; cursor: not-allowed; opa
 .rank-row { display: flex; align-items: center; justify-content: space-between; font-size: 12px; margin-bottom: 4px; }
 .rank-color { width: 12px; height: 12px; border-radius: 50%; display: inline-block; margin-right: 5px; }
 
-/* マーカー */
 .node-marker { border-radius: 50%; border: 2px solid #1a252f; box-sizing: border-box; cursor: pointer; text-align: center; box-shadow: 0 2px 5px rgba(0,0,0,0.5);}
 .castle-main { width: 20px !important; height: 20px !important; margin-left: -10px !important; margin-top: -10px !important; }
 .castle-sub { width: 14px !important; height: 14px !important; margin-left: -7px !important; margin-top: -7px !important; }
@@ -38,7 +37,6 @@ button:disabled { background-color: #95a5a6 !important; cursor: not-allowed; opa
 .slider-container { display: flex; align-items: center; gap: 8px; background: rgba(0,0,0,0.3); padding: 5px 10px; border-radius: 4px;}
 .instruction { font-size: 11px; background-color: #fff3cd; color: #856404; padding: 8px; border-radius: 4px; border: 1px solid #ffeeba; margin-top: 10px; line-height: 1.4; }
 
-/* 演出 */
 #ui-season { font-size: 16px; margin-right: 10px; font-weight: bold; }
 .season-spring { color: #e84393; } .season-summer { color: #27ae60; }
 .season-autumn { color: #d35400; } .season-winter { color: #2980b9; }
@@ -48,7 +46,6 @@ button:disabled { background-color: #95a5a6 !important; cursor: not-allowed; opa
 .castle-flash { animation: captureFlash 1s ease-out; }
 @keyframes captureFlash { 0% { box-shadow: 0 0 30px 15px rgba(255, 255, 255, 1); transform: scale(1.5); } 100% { box-shadow: 0 0 0 0 rgba(255, 255, 255, 0); transform: scale(1); } }
 
-/* 詳細統計モーダル */
 #stats-modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 4000; display: flex; justify-content: center; align-items: center; }
 #stats-modal.modal-hidden { display: none; }
 .modal-content { background: #ecf0f1; color: #2c3e50; padding: 25px; border-radius: 8px; width: 85%; max-height: 85%; overflow-y: auto; position: relative; box-shadow: 0 5px 20px rgba(0,0,0,0.5); }
