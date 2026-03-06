@@ -1,4 +1,4 @@
-// --- engine.js: 高度AI ＋ ZOC ＋ すれ抜け防止 ＋ 好機察知（ハイエナ）完全版 ---
+// --- engine.js: 高度AI ＋ ZOC ＋ 輸送・兵站システム 完全版 ---
 
 const GameState = {
     isLoaded: false, hasStarted: false, isPaused: true,
@@ -339,6 +339,7 @@ const gameEngine = {
             }
 
             let speedModByTroops = Math.max(0.5, Math.min(1.2, 1.2 - (a.troops / 20000)));
+            // 🌟 輸送隊は重いため通常より遅い
             let baseSpd = 6.0;
             if (a.task === 'transport') baseSpd = 3.0; 
             else if (a.task === 'retreat') baseSpd = 7.8; 
@@ -390,6 +391,7 @@ const gameEngine = {
             }
         }
 
+        // 同勢力・同盟軍勢同士の合流処理
         for (let i = 0; i < GameState.armies.length; i++) {
             for (let j = i + 1; j < GameState.armies.length; j++) {
                 let a1 = GameState.armies[i], a2 = GameState.armies[j];
@@ -397,6 +399,7 @@ const gameEngine = {
                 if (a1.task === 'retreat' || a2.task === 'retreat') continue; 
 
                 if (map.distance(L.latLng(a1.pos), L.latLng(a2.pos)) < 500) {
+                    // 輸送隊が別の軍勢に合流した場合は荷物を渡す
                     if (a1.task==='transport' || a2.task==='transport') {
                         let t = a1.task==='transport'?a1:a2, r = a1.task==='transport'?a2:a1;
                         r.troops += t.troops; r.gold += t.gold; r.food += t.food; t.troops = 0;
@@ -424,8 +427,12 @@ const gameEngine = {
 
             if (map.distance(L.latLng(army.pos), L.latLng(node.lat, node.lng)) < 200) {
                 if (castle.faction === army.faction) {
+                    // 🌟 輸送隊の城への到着・合流
                     if (army.task === 'transport' || (army.pathQueue.length === 0 && !army.targetLatLng && !army.targetArmyId) || army.task === 'retreat') {
                         castle.troops += army.troops; castle.gold += army.gold; castle.food += army.food; army.troops = 0;
+                        if (army.task === 'transport' && army.faction === GameState.playerFaction) {
+                            this.log(`<span style="color:#27ae60;">🛒 輸送隊が ${castle.name} に到着し、物資を納入しました。</span>`);
+                        }
                     }
                 } else if (!window.areAllies(army.faction, castle.faction)) {
                     army.pathQueue = []; army.targetLatLng = null; army.targetArmyId = null;
@@ -457,12 +464,14 @@ const gameEngine = {
             }
         });
 
+        // 🌟 野戦と略奪システム
         for(let i=0; i<GameState.armies.length; i++) {
             for(let j=i+1; j<GameState.armies.length; j++) {
                 let a1 = GameState.armies[i], a2 = GameState.armies[j];
                 if (a1.troops <= 0 || a2.troops <= 0 || window.areAllies(a1.faction, a2.faction)) continue;
                 
                 if (map.distance(L.latLng(a1.pos), L.latLng(a2.pos)) < 1000) {
+                    // 輸送隊は戦闘力が通常の30%しかない（極めて弱い）
                     let p1 = a1.troops * (a1.task==='transport'?0.3:1.0);
                     let p2 = a2.troops * (a2.task==='transport'?0.3:1.0);
                     
@@ -470,9 +479,15 @@ const gameEngine = {
                     if (p1 > p2) { a2.troops -= Math.floor(p1*0.2); a1.troops -= Math.floor(p2*0.1); if(a2.troops<=10){a2.troops=0; winner=a1; loser=a2;} }
                     else { a1.troops -= Math.floor(p2*0.2); a2.troops -= Math.floor(p1*0.1); if(a1.troops<=10){a1.troops=0; winner=a2; loser=a1;} }
                     
+                    // 勝者は敗者の物資の70%を略奪する
                     if (winner && loser) {
                         let sG = Math.floor(loser.gold * 0.7); let sF = Math.floor(loser.food * 0.7);
                         winner.gold += sG; winner.food += sF; loser.gold = 0; loser.food = 0;
+                        if (loser.task === 'transport' && winner.faction === GameState.playerFaction) {
+                            this.log(`<span style="color:#f39c12; font-weight:bold;">💰 敵の輸送隊を撃破し、金${sG} 糧${sF} を略奪しました！</span>`);
+                        } else if (loser.task === 'transport' && loser.faction === GameState.playerFaction) {
+                            this.log(`<span style="color:#c0392b; font-weight:bold;">🔥 我が軍の輸送隊が敵の襲撃を受け、物資を強奪されました！</span>`);
+                        }
                     }
                     
                     a1.pathQueue = []; a2.pathQueue = []; a1.targetLatLng = null; a2.targetLatLng = null;
@@ -544,14 +559,11 @@ const gameEngine = {
                 .sort((a, b) => a.dist - b.dist)
                 .slice(0, 5);
 
-            // 🌟 絶好の機会（好機察知・空き巣）判定
-            // 近く(20km以内)に、自軍の出陣兵力の30%未満の戦力しかない敵城があるかを毎日チェック
             let hasChance = candidates.some(cand => {
                 let enemyPower = cand.castle.troops + (cand.castle.siegeHP * 0.5);
                 return cand.dist < 20000 && enemyPower < (deployTroops * 0.3);
             });
 
-            // 弱った城があれば60%の確率で即応、無ければ5%の確率で気まぐれに検討
             let launchProb = hasChance ? 0.60 : 0.05;
             if (Math.random() >= launchProb) return;
 
@@ -571,10 +583,7 @@ const gameEngine = {
                 if (deployTroops < enemyPower * 1.2 && targetCastle.faction !== 'independent') return;
 
                 let hateBonus = (GameState.hateMatrix[c.faction]?.[targetCastle.faction] || 0) * 10;
-                
-                // 🌟 ガラ空きの城には「+10000」のスコアボーナスを与えて最優先で狙わせる
                 let chanceBonus = (enemyPower < deployTroops * 0.3 && cand.dist < 20000) ? 10000 : 0;
-                
                 let score = (10000 / (cand.dist + 1)) - enemyPower + hateBonus + chanceBonus;
                 
                 if (score > bestScore) { bestScore = score; bestTarget = { id: targetCastle.id, route: route }; bestFoodReq = estFood; }
@@ -586,12 +595,64 @@ const gameEngine = {
                     a.pathQueue = bestTarget.route; a.targetNodeId = bestTarget.id;
                     let targetCastle = GameState.castles[bestTarget.id];
                     let targetPower = targetCastle.troops + (targetCastle.siegeHP * 0.5);
-                    
-                    // ハイエナ攻撃の場合は専用の赤いログを出す
                     if (targetPower < deployTroops * 0.3) {
                         this.log(`<span style="color:#e74c3c; font-weight:bold;">【急襲】${FactionMaster[c.faction].name} が手薄となった ${targetCastle.name} へ好機と見て侵攻開始！</span>`);
                     } else {
                         this.log(`<span class="log-ai">【出陣】${FactionMaster[c.faction].name} が ${targetCastle.name} へ侵攻開始！</span>`);
+                    }
+                }
+            }
+        });
+
+        // 🌟 3. AIの物流（兵站・輸送）アルゴリズム
+        Object.values(GameState.castles).forEach(src => {
+            if (src.faction === 'independent' || (GameState.playerFaction && src.faction === GameState.playerFaction)) return;
+            
+            // 毎日2%の確率で輸送業務を検討
+            if (Math.random() >= 0.02) return;
+
+            // 後方の安全な城で物資に余裕があるか（石高の10倍以上の兵糧、金500以上）
+            if (src.food > src.currentKokudaka * 10 && src.gold > 500) {
+                // 同じ勢力の城で、兵糧が不足している前線拠点（石高の3倍未満）を探す
+                let dests = Object.values(GameState.castles).filter(d => 
+                    d.faction === src.faction && d.id !== src.id && d.food < d.currentKokudaka * 3
+                );
+                
+                if (dests.length > 0) {
+                    // 一番近い困っている城を選ぶ
+                    dests.sort((a, b) => {
+                        let d1 = map.distance(L.latLng(window.rawNodes.find(n=>n.id===a.id)), L.latLng(window.rawNodes.find(n=>n.id===src.id)));
+                        let d2 = map.distance(L.latLng(window.rawNodes.find(n=>n.id===b.id)), L.latLng(window.rawNodes.find(n=>n.id===src.id)));
+                        return d1 - d2;
+                    });
+                    
+                    let targetDest = dests[0];
+                    let route = findShortestPath(src.id, targetDest.id);
+                    
+                    // 安全経路チェック（ルート上に敵城がないか確認）
+                    let isSafe = true;
+                    if (route) {
+                        for (let step of route) {
+                            let stepNodeId = step.nodeId;
+                            let stepCastle = GameState.castles[stepNodeId];
+                            // ルート上に敵の城がある場合は自殺行為なので輸送を中止する
+                            if (stepCastle && stepCastle.faction !== src.faction && !window.areAllies(src.faction, stepCastle.faction)) {
+                                isSafe = false; break;
+                            }
+                        }
+                    }
+
+                    if (route && isSafe) {
+                        // 護衛も兼ねて城の兵力の10%を付け、金30%と兵糧40%を送る
+                        let tTroops = Math.max(100, Math.floor(src.troops * 0.1)); 
+                        let tGold = Math.floor(src.gold * 0.3);
+                        let tFood = Math.floor(src.food * 0.4);
+                        let a = window.deployArmy(src.id, tTroops, true, 'transport', tGold, tFood);
+                        if (a) {
+                            a.pathQueue = route;
+                            a.targetNodeId = targetDest.id;
+                            // AIの輸送の様子はログに出さない（うるさくなるため）が、システム上は動いている
+                        }
                     }
                 }
             }
