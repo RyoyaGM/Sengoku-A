@@ -1,4 +1,4 @@
-// --- engine.js: 5段階警戒レベル・フリーズ回避・外交統合・高度AI版 ---
+// --- engine.js: 5段階警戒レベル・フリーズ回避・外交統合・高度AI（駐屯/補給/自動撤退）版 ---
 
 const GameState = {
     isLoaded: false, hasStarted: false, isPaused: true,
@@ -97,9 +97,9 @@ const gameEngine = {
             let baseRate = 3.0;
             let foodConsumed = 0;
 
-            // 1. 同盟拠点での「駐屯・補給」ロジック
+            // 🌟 1. 同盟拠点での「駐屯・補給」ロジック
             if (distToNode < 200 && isStrictAlly && a.task !== 'retreat') {
-                let dailyFoodReq = Math.floor((a.troops / 100) * 1.5 * pIdx); // 駐屯時は基本消費半減
+                let dailyFoodReq = Math.floor((a.troops / 100) * 1.5 * pIdx); // 駐屯時消費は通常の半分(1.5)
                 let castleMinFood = Math.floor((castleAtNode.troops / 100) * 0.3 * pIdx * 30); // 城の生存ライン(30日分)
 
                 if (castleAtNode.food > castleMinFood + dailyFoodReq) {
@@ -107,24 +107,24 @@ const gameEngine = {
                     let castleBurden = Math.floor(dailyFoodReq * 0.7);
                     let armyBurden = dailyFoodReq - castleBurden;
                     
-                    // 金による支払い (金0.1 / 兵糧1)
-                    let cost = Math.floor(castleBurden * 0.1);
+                    // 金による支払い (兵糧10につき金1)
+                    let cost = Math.max(1, Math.floor(castleBurden * 0.1));
                     if (a.gold >= cost) {
                         a.gold -= cost;
                         castleAtNode.gold += cost;
                         castleAtNode.food -= castleBurden;
                         foodConsumed = armyBurden;
                         
-                        // 駐屯中の微小な兵数回復 (治療)
+                        // 駐屯中の微小な兵数回復 (治療: 資金1消費)
                         if (a.troops < 50000 && a.gold > 0) {
                             a.troops += Math.floor(a.troops * 0.001);
                             a.gold -= 1;
                         }
                     } else {
-                        foodConsumed = dailyFoodReq; // 払えなければ自腹
+                        foodConsumed = dailyFoodReq; // 金が払えない場合は全額自腹
                     }
                 } else {
-                    foodConsumed = dailyFoodReq; // 城に余裕がなければ自腹
+                    foodConsumed = dailyFoodReq; // 城に余裕がない場合は全額自腹
                 }
             } else {
                 // 通常の消費ロジック
@@ -143,67 +143,55 @@ const gameEngine = {
                 if(GameState.day % 10 === 0) window.showFloatingText(a.pos.lat, a.pos.lng, "飢餓", "#e74c3c");
             }
 
-            // 3. 高度な飢餓回避（予測撤退ロジック）
-            if (a.task !== 'retreat') {
-                let closestSelf = null; let minDist = Infinity;
-                Object.values(GameState.castles).forEach(c => {
-                    if (c.faction === a.faction) { // 自勢力の拠点を対象とする
-                        let cn = window.rawNodes.find(n => n.id === c.id);
-                        let d = map.distance(L.latLng(a.pos.lat, a.pos.lng), L.latLng(cn.lat, cn.lng));
-                        if (d < minDist) { minDist = d; closestSelf = c; }
-                    }
-                });
+            // 🌟 最寄りの自勢力拠点を計算（帰還・撤退用）
+            let closestSelf = null; let minDistToSelf = Infinity;
+            Object.values(GameState.castles).forEach(c => {
+                if (c.faction === a.faction) { 
+                    let cn = window.rawNodes.find(n => n.id === c.id);
+                    let d = map.distance(L.latLng(a.pos.lat, a.pos.lng), L.latLng(cn.lat, cn.lng));
+                    if (d < minDistToSelf) { minDistToSelf = d; closestSelf = c; }
+                }
+            });
+
+            // 🌟 3. 高度な飢餓回避（予測撤退ロジック）
+            if (a.task !== 'retreat' && closestSelf) {
+                let cn = window.rawNodes.find(n => n.id === closestSelf.id);
+                let route = window.findShortestPath(getClosestNode(a.pos).id, cn.id);
+                let daysToReturn = route ? Math.ceil(route.reduce((sum, r) => sum + (r.dist / r.speedMod), 0) / 6.0) : 0;
                 
-                if (closestSelf) {
-                    let cn = window.rawNodes.find(n => n.id === closestSelf.id);
-                    let route = window.findShortestPath(getClosestNode(a.pos).id, cn.id);
-                    let daysToReturn = route ? Math.ceil(route.reduce((sum, r) => sum + (r.dist / r.speedMod), 0) / 6.0) : 0;
-                    
-                    // 撤退に必要な兵糧 ＋ 5日の予備バッファ
-                    let reqFood = Math.floor((a.troops / 100) * 3.0 * pIdx * (daysToReturn + 5)); 
-                    
-                    if (a.food < reqFood) {
-                        a.task = 'retreat'; 
-                        a.pathQueue = route || []; 
-                        a.targetNodeId = closestSelf.id; 
-                        a.targetArmyId = null; 
-                        a.targetLatLng = null;
-                        if(a.faction === GameState.playerFaction) this.log(`<span style="color:#e74c3c;">⚠️ 兵糧不足の恐れ！部隊が ${closestSelf.name} へ緊急退却を開始！</span>`);
-                    }
+                // 撤退に必要な兵糧 ＋ 5日の予備バッファ
+                let reqFood = Math.floor((a.troops / 100) * 3.0 * pIdx * (daysToReturn + 5)); 
+                
+                if (a.food < reqFood) {
+                    a.task = 'retreat'; 
+                    a.pathQueue = route || []; 
+                    a.targetNodeId = closestSelf.id; 
+                    a.targetArmyId = null; 
+                    a.targetLatLng = null;
+                    if(a.faction === GameState.playerFaction) this.log(`<span style="color:#e74c3c;">⚠️ 兵糧不足の恐れ！部隊が ${closestSelf.name} へ緊急退却を開始！</span>`);
                 }
             }
 
-            // 2. 援軍のミッション完了判定と自動帰還
-            if (GameState.day % 10 === 0 && a.task !== 'retreat' && isStrictAlly && distToNode < 500) {
-                // 援軍先の城の周囲(1000m)に敵軍がいるかチェック
-                let isThreatened = GameState.armies.some(otherA => {
-                    if (otherA.troops <= 0) return false;
-                    if (window.areAllies(a.faction, otherA.faction)) return false;
-                    let d = map.distance(L.latLng(otherA.pos), L.latLng(node.lat, node.lng));
-                    return d < 1000;
+            // 🌟 2. 援軍の任務完了判定（防衛対象が狙われていなければ撤退）
+            if (GameState.day % 5 === 0 && a.task !== 'retreat' && isStrictAlly && distToNode < 500) {
+                // その城を targetNodeId としている敵軍が存在するかを世界中から検索
+                let isTargeted = GameState.armies.some(otherA => {
+                    if (otherA.troops <= 0 || window.areAllies(a.faction, otherA.faction)) return false;
+                    return otherA.targetNodeId === node.id;
                 });
 
-                if (!isThreatened) {
-                    let closestSelf = null; let minD = Infinity;
-                    Object.values(GameState.castles).forEach(c => {
-                        if (c.faction === a.faction) {
-                            let cn = window.rawNodes.find(n => n.id === c.id);
-                            let d = map.distance(L.latLng(a.pos.lat, a.pos.lng), L.latLng(cn.lat, cn.lng));
-                            if (d < minD) { minD = d; closestSelf = c; }
-                        }
-                    });
-                    if (closestSelf) {
-                        let cn = window.rawNodes.find(n => n.id === closestSelf.id);
-                        let route = window.findShortestPath(getClosestNode(a.pos).id, cn.id);
-                        a.task = 'retreat';
-                        a.pathQueue = route || [];
-                        a.targetNodeId = closestSelf.id;
-                        a.targetArmyId = null;
-                        a.targetLatLng = null;
-                        // 援軍成功で友好度にボーナス
-                        window.addFriendship(castleAtNode.faction, a.faction, 20);
-                        if(a.faction === GameState.playerFaction) this.log(`<span style="color:#27ae60;">🕊️ 任務完了。援軍部隊が ${closestSelf.name} へ帰還を開始。</span>`);
-                    }
+                if (!isTargeted && closestSelf) {
+                    let cn = window.rawNodes.find(n => n.id === closestSelf.id);
+                    let route = window.findShortestPath(getClosestNode(a.pos).id, cn.id);
+                    a.task = 'retreat';
+                    a.pathQueue = route || [];
+                    a.targetNodeId = closestSelf.id;
+                    a.targetArmyId = null;
+                    a.targetLatLng = null;
+                    
+                    // 援軍成功で城主から自勢力への友好度にボーナス
+                    window.addFriendship(castleAtNode.faction, a.faction, 20);
+                    if(a.faction === GameState.playerFaction) this.log(`<span style="color:#27ae60;">🕊️ 敵影なし（任務完了）。援軍部隊が ${closestSelf.name} へ帰還を開始。</span>`);
                 }
             }
         });
@@ -223,17 +211,17 @@ const gameEngine = {
             }
         }
 
-        // 4. 移動ロジックとスタック防止
+        // 🌟 4. 移動ロジックとスタック（棒立ち）防止
         GameState.armies.forEach(a => {
             if (a.troops <= 0) return;
             
-            // ターゲット軍勢消失時のフォールバック処理
+            // ターゲット軍勢消失時のフォールバック処理（立ち往生防止）
             if (a.targetArmyId) {
                 let ta = GameState.armies.find(x => x.id === a.targetArmyId);
                 if (!ta || ta.troops <= 0) { 
                     a.targetArmyId = null; 
                     a.pathQueue = []; 
-                    a.task = 'retreat'; // 迷子になる前に帰還させる
+                    a.task = 'retreat'; // 対象が消えたら帰還モードへ
                 }
                 else if (GameState.day % 3 === 0) {
                     let r = window.findShortestPath(getClosestNode(a.pos).id, getClosestNode(ta.pos).id);
@@ -249,7 +237,7 @@ const gameEngine = {
                     if (currentDist > 500) { // まだ着いていないのに経路が空の場合
                         let r = window.findShortestPath(getClosestNode(a.pos).id, a.targetNodeId);
                         if (r && r.length > 0) a.pathQueue = r;
-                        else a.task = 'retreat'; // 道がないなら帰る
+                        else a.task = 'retreat'; // 道がないなら強制帰還
                     }
                 }
             }
@@ -258,12 +246,16 @@ const gameEngine = {
             if (n) { let i = window.rawNodes.find(x => x.id === n.nodeId); tLat = i.lat; tLng = i.lng; spd = n.speedMod; }
             else if (a.targetLatLng) { tLat = a.targetLatLng.lat; tLng = a.targetLatLng.lng; }
             else if (a.targetArmyId) { let ta = GameState.armies.find(x => x.id === a.targetArmyId); tLat = ta.pos.lat; tLng = ta.pos.lng; }
-            else return;
+            else {
+                // 完全な目標喪失時は自動で帰還
+                if (a.task !== 'hold' && a.task !== 'retreat') a.task = 'retreat';
+                return;
+            }
 
             let speedModByTroops = Math.max(0.5, Math.min(1.2, 1.2 - (a.troops / 20000)));
             let baseSpd = 6.0;
             if (a.task === 'transport') baseSpd = 3.0; 
-            else if (a.task === 'retreat') baseSpd = 7.8; // 帰還時は必死に走る
+            else if (a.task === 'retreat') baseSpd = 7.8; // 撤退時は強行軍で速い
             
             let move = baseSpd * speedModByTroops * (isWinter ? 0.5 : 1.0) * spd;
             let d = map.distance(L.latLng(a.pos.lat, a.pos.lng), L.latLng(tLat, tLng)) / 1000;
