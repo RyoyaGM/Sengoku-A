@@ -1,4 +1,4 @@
-// --- engine.js: 5段階警戒レベル・高度AI（迷子復旧・攻城固定）完全版 ---
+// --- engine.js: 5段階警戒レベル・高度AI（迷子復旧・ラストマイル完歩）完全版 ---
 
 const GameState = {
     isLoaded: false, hasStarted: false, isPaused: true,
@@ -248,7 +248,7 @@ const gameEngine = {
             }
         }
 
-        // 🌟 移動ロジックと「迷子復旧・攻城固定」
+        // 🌟 移動ロジックと「ラストマイルの完歩・攻城固定」
         GameState.armies.forEach(a => {
             if (a.troops <= 0) return;
             
@@ -264,7 +264,7 @@ const gameEngine = {
             let currentNode = getClosestNode(a.pos);
             let distToCurrentNode = map.distance(L.latLng(a.pos), L.latLng(currentNode.lat, currentNode.lng));
 
-            // 迷子復旧処理 (Dead-end Recovery) - 改良版
+            // 迷子復旧処理
             if (a.pathQueue.length === 0 && a.targetNodeId && a.task !== 'hold') {
                 let targetNode = window.rawNodes.find(n => n.id === a.targetNodeId);
                 if (targetNode) {
@@ -272,31 +272,51 @@ const gameEngine = {
                     if (currentDist > 500) { 
                         let r = window.findShortestPath(currentNode.id, a.targetNodeId);
                         if (r && r.length > 0) a.pathQueue = r;
-                        else a.task = 'retreat'; 
+                        else if (currentNode.id !== a.targetNodeId) a.task = 'retreat'; 
                     }
                 }
             }
 
             let n = a.pathQueue[0], tLat, tLng, spd = 1.0;
-            if (n) { let i = window.rawNodes.find(x => x.id === n.nodeId); tLat = i.lat; tLng = i.lng; spd = n.speedMod; }
-            else if (a.targetLatLng) { tLat = a.targetLatLng.lat; tLng = a.targetLatLng.lng; }
-            else if (a.targetArmyId) { let ta = GameState.armies.find(x => x.id === a.targetArmyId); tLat = ta.pos.lat; tLng = ta.pos.lng; }
-            else {
-                // 🌟 ここから下が「城にいる部隊」と「迷子になった部隊」の仕分け
-                
-                // 攻城中の固定 (目標の城にいて、タスクが attack の場合)
-                if (a.task === 'attack' && a.targetNodeId) {
-                    let tNode = window.rawNodes.find(nx => nx.id === a.targetNodeId);
-                    if (tNode && map.distance(L.latLng(a.pos), L.latLng(tNode.lat, tNode.lng)) < 500) {
-                        return; // 攻城中なので移動処理はスキップして城に張り付く
+            let needsMovement = false;
+
+            if (n) { 
+                let i = window.rawNodes.find(x => x.id === n.nodeId); tLat = i.lat; tLng = i.lng; spd = n.speedMod; needsMovement = true; 
+            }
+            else if (a.targetLatLng) { 
+                tLat = a.targetLatLng.lat; tLng = a.targetLatLng.lng; needsMovement = true; 
+            }
+            else if (a.targetArmyId) { 
+                let ta = GameState.armies.find(x => x.id === a.targetArmyId); 
+                if(ta) { tLat = ta.pos.lat; tLng = ta.pos.lng; needsMovement = true; }
+            }
+            else if (a.targetNodeId) {
+                // 🌟 [修正ポイント] 経路が空でも、まだ目的地から少し離れていれば直接歩き続ける（ラストマイルの完歩）
+                let tNode = window.rawNodes.find(x => x.id === a.targetNodeId);
+                if (tNode) {
+                    let dToTarget = map.distance(L.latLng(a.pos.lat, a.pos.lng), L.latLng(tNode.lat, tNode.lng));
+                    if (dToTarget > 50) { 
+                        tLat = tNode.lat; tLng = tNode.lng; spd = 1.0; needsMovement = true;
                     }
                 }
+            }
 
-                // 意図的な待機(プレイヤー指定) または 駐屯中(城の上) は動かさない
+            if (!needsMovement) {
+                // 完全に到着している、あるいは本当に目標が無い場合の仕分け処理
+                
+                if (a.task === 'attack' && a.targetNodeId) {
+                    let tNode = window.rawNodes.find(nx => nx.id === a.targetNodeId);
+                    if (tNode && map.distance(L.latLng(a.pos), L.latLng(tNode.lat, tNode.lng)) < 500) return; // 攻城固定
+                }
+
                 if (a.task === 'hold' && a.targetLatLng) return;
                 if (a.task === 'hold' && distToCurrentNode < 500) return;
 
-                // 上記のどれにも当てはまらない（目標を失って道端にいる）場合は強制的に「帰還」をセット
+                if (a.task === 'retreat' && a.targetNodeId) {
+                    let tNode = window.rawNodes.find(nx => nx.id === a.targetNodeId);
+                    if (tNode && map.distance(L.latLng(a.pos), L.latLng(tNode.lat, tNode.lng)) < 200) return; // 吸収待ち
+                }
+
                 a.task = 'retreat';
                 let closestSelf = null; let minDistToSelf = Infinity;
                 Object.values(GameState.castles).forEach(c => {
@@ -308,12 +328,17 @@ const gameEngine = {
                 });
                 
                 if (closestSelf) {
-                    let route = window.findShortestPath(currentNode.id, closestSelf.id);
-                    if (route) { a.pathQueue = route; a.targetNodeId = closestSelf.id; }
+                    if (currentNode.id === closestSelf.id) {
+                        a.pathQueue = []; a.targetNodeId = closestSelf.id; 
+                    } else {
+                        let route = window.findShortestPath(currentNode.id, closestSelf.id);
+                        if (route) { a.pathQueue = route; a.targetNodeId = closestSelf.id; }
+                    }
                 }
-                return; // 経路をセットしたので次のTickから動き出す
+                return; 
             }
 
+            // 移動の実行
             let speedModByTroops = Math.max(0.5, Math.min(1.2, 1.2 - (a.troops / 20000)));
             let baseSpd = 6.0;
             if (a.task === 'transport') baseSpd = 3.0; 
