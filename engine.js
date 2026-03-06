@@ -1,4 +1,4 @@
-// --- engine.js: 兵站・自動撤退 ＋ 史実的包囲網システム統合版 ---
+// --- engine.js: 外交工作・呉越同舟・摩擦停止 統合版 ---
 
 const GameState = {
     isLoaded: false, hasStarted: false, isPaused: true,
@@ -7,6 +7,7 @@ const GameState = {
     priceIndex: 1.0, tasks: [] 
 };
 
+// 🌟 グローバル関数化（main.jsからも呼べるように）
 window.getAllianceLevel = function(f1, f2) {
     if (f1 === f2) return 3;
     return GameState.alliances[`${f1}-${f2}`] || GameState.alliances[`${f2}-${f1}`] || 0;
@@ -15,9 +16,17 @@ window.getDiplomacyScore = function(f1, f2) {
     return (GameState.friendshipMatrix[f1]?.[f2] || 0) - (GameState.hateMatrix[f1]?.[f2] || 0);
 };
 
-function addHate(f1, f2, v) { if(f1===f2||f1==='independent'||f2==='independent') return; if(!GameState.hateMatrix[f1]) GameState.hateMatrix[f1]={}; GameState.hateMatrix[f1][f2]=(GameState.hateMatrix[f1][f2]||0)+v; }
-function addFriendship(f1, f2, v) { if(f1===f2||f1==='independent'||f2==='independent') return; if(!GameState.friendshipMatrix[f1]) GameState.friendshipMatrix[f1]={}; GameState.friendshipMatrix[f1][f2]=(GameState.friendshipMatrix[f1][f2]||0)+v; }
-function areAllies(f1, f2) { return window.getAllianceLevel(f1, f2) > 0; }
+window.addHate = function(f1, f2, v) { 
+    if(f1===f2||f1==='independent'||f2==='independent') return; 
+    if(!GameState.hateMatrix[f1]) GameState.hateMatrix[f1]={}; 
+    GameState.hateMatrix[f1][f2]=(GameState.hateMatrix[f1][f2]||0)+v; 
+};
+window.addFriendship = function(f1, f2, v) { 
+    if(f1===f2||f1==='independent'||f2==='independent') return; 
+    if(!GameState.friendshipMatrix[f1]) GameState.friendshipMatrix[f1]={}; 
+    GameState.friendshipMatrix[f1][f2]=(GameState.friendshipMatrix[f1][f2]||0)+v; 
+};
+window.areAllies = function(f1, f2) { return window.getAllianceLevel(f1, f2) > 0; };
 
 const gameEngine = {
     log: function(m) {
@@ -53,7 +62,7 @@ const gameEngine = {
         const pIdx = GameState.priceIndex;
         const isWinter = (GameState.month === 12 || GameState.month <= 2);
 
-        // 城の消費（駐屯兵: 0.3/日）
+        // 城の消費
         Object.values(GameState.castles).forEach(c => {
             if(c.faction === 'independent') return;
             c.food -= Math.floor((c.troops / 100) * 0.3 * pIdx);
@@ -64,7 +73,7 @@ const gameEngine = {
         GameState.armies.forEach(a => {
             if (a.troops <= 0) return;
             let node = getClosestNode(a.pos);
-            let isAllyTerritory = (node && node.type !== "5" && node.type !== "0") ? areAllies(a.faction, GameState.castles[node.id].faction) : false;
+            let isAllyTerritory = (node && node.type !== "5" && node.type !== "0") ? window.areAllies(a.faction, GameState.castles[node.id].faction) : false;
             
             let baseRate = 3.0;
             if (a.task === 'retreat') baseRate = isAllyTerritory ? 2.0 : 3.0;
@@ -79,11 +88,10 @@ const gameEngine = {
                 if(GameState.day % 10 === 0) window.showFloatingText(a.pos.lat, a.pos.lng, "飢餓", "#e74c3c");
             }
 
-            // 帰還限界点（退却）の判定
             if (a.task !== 'retreat') {
                 let closestAlly = null; let minDist = Infinity;
                 Object.values(GameState.castles).forEach(c => {
-                    if (areAllies(c.faction, a.faction)) {
+                    if (window.areAllies(c.faction, a.faction)) {
                         let cn = window.rawNodes.find(n => n.id === c.id);
                         let d = map.distance(L.latLng(a.pos.lat, a.pos.lng), L.latLng(cn.lat, cn.lng));
                         if (d < minDist) { minDist = d; closestAlly = c; }
@@ -190,7 +198,7 @@ const gameEngine = {
                     if (army.task === 'transport' || (army.pathQueue.length === 0 && !army.targetLatLng && !army.targetArmyId)) {
                         castle.troops += army.troops; castle.gold += army.gold; castle.food += army.food; army.troops = 0;
                     }
-                } else if (!areAllies(army.faction, castle.faction)) {
+                } else if (!window.areAllies(army.faction, castle.faction)) {
                     army.pathQueue = []; army.targetLatLng = null; army.targetArmyId = null;
                     if (castle.siegeHP > 0) {
                         let dmg = Math.floor(army.troops * 0.05); castle.siegeHP -= dmg;
@@ -213,7 +221,7 @@ const gameEngine = {
         for(let i=0; i<GameState.armies.length; i++) {
             for(let j=i+1; j<GameState.armies.length; j++) {
                 let a1 = GameState.armies[i], a2 = GameState.armies[j];
-                if (a1.troops <= 0 || a2.troops <= 0 || areAllies(a1.faction, a2.faction)) continue;
+                if (a1.troops <= 0 || a2.troops <= 0 || window.areAllies(a1.faction, a2.faction)) continue;
                 
                 if (map.distance(L.latLng(a1.pos), L.latLng(a2.pos)) < 1000) {
                     let p1 = a1.troops * (a1.task==='transport'?0.3:1.0);
@@ -229,13 +237,13 @@ const gameEngine = {
                     }
                     
                     a1.pathQueue = []; a2.pathQueue = []; a1.targetLatLng = null; a2.targetLatLng = null;
-                    addHate(a1.faction, a2.faction, 10); addHate(a2.faction, a1.faction, 10);
+                    window.addHate(a1.faction, a2.faction, 10); window.addHate(a2.faction, a1.faction, 10);
                     
                     [a1, a2].forEach(target => {
                         const nearby = getClosestNode(target.pos);
                         if (nearby && nearby.type !== "5" && nearby.type !== "0") { 
                             const castle = GameState.castles[nearby.id];
-                            if (castle && areAllies(castle.faction, (target===a1?a2:a1).faction) && castle.faction !== target.faction) {
+                            if (castle && window.areAllies(castle.faction, (target===a1?a2:a1).faction) && castle.faction !== target.faction) {
                                 target.troops = Math.max(0, target.troops - Math.floor(castle.troops * 0.02));
                             }
                         }
@@ -278,7 +286,7 @@ const gameEngine = {
             }
         });
 
-        // 2. ターゲット選定と厳密な兵糧計算・包囲網ヘイトの反映
+        // 2. ターゲット選定と厳密な兵糧計算
         Object.values(GameState.castles).forEach(c => {
             if(c.faction === 'independent' || (GameState.playerFaction && c.faction === GameState.playerFaction)) return;
             
@@ -288,7 +296,7 @@ const gameEngine = {
             const cN = window.rawNodes.find(n => n.id === c.id);
             
             let candidates = Object.values(GameState.castles)
-                .filter(t => t.faction !== c.faction && !areAllies(c.faction, t.faction))
+                .filter(t => t.faction !== c.faction && !window.areAllies(c.faction, t.faction))
                 .map(t => {
                     let tN = window.rawNodes.find(n => n.id === t.id);
                     let dist = map.distance(L.latLng(cN.lat, cN.lng), L.latLng(tN.lat, tN.lng));
@@ -312,7 +320,6 @@ const gameEngine = {
                 let enemyPower = targetCastle.troops + (targetCastle.siegeHP * 0.5);
                 if (deployTroops < enemyPower * 1.2 && targetCastle.faction !== 'independent') return;
 
-                // 🌟 包囲網ヘイトによる好戦性ボーナス
                 let hateBonus = (GameState.hateMatrix[c.faction]?.[targetCastle.faction] || 0) * 10;
                 let score = (10000 / (cand.dist + 1)) - enemyPower + hateBonus;
                 
@@ -341,13 +348,15 @@ const gameEngine = {
             let max = getMaxTroops(c); if(c.troops < max) c.troops += Math.floor(max * 0.05);
         });
 
-        // 🌟 領土摩擦（隣接する大名同士は徐々にヘイトが溜まる）
+        // 🌟 領土摩擦（同盟・和睦を結んでいれば摩擦によるヘイト上昇は停止）
         Object.values(GameState.castles).forEach(c => {
             if (c.faction === 'independent') return;
             window.graph[c.id].forEach(edge => {
                 let neighbor = GameState.castles[edge.to];
                 if (neighbor && neighbor.faction !== 'independent' && neighbor.faction !== c.faction) {
-                    addHate(c.faction, neighbor.faction, 2); 
+                    if (!window.areAllies(c.faction, neighbor.faction)) {
+                        window.addHate(c.faction, neighbor.faction, 2); 
+                    }
                 }
             });
         });
@@ -384,7 +393,7 @@ const gameEngine = {
                     let mN = window.rawNodes.find(n => n.id === mc.id);
                     for(let tc of targetCastles) {
                         let tN = window.rawNodes.find(n => n.id === tc.id);
-                        if (map.distance(L.latLng(mN.lat, mN.lng), L.latLng(tN.lat, tN.lng)) < 50000) { // 50km圏内
+                        if (map.distance(L.latLng(mN.lat, mN.lng), L.latLng(tN.lat, tN.lng)) < 50000) { 
                             isNear = true; break;
                         }
                     }
@@ -392,39 +401,83 @@ const gameEngine = {
                 }
                 if (isNear) {
                     antiFactions.push(f);
-                    addHate(f, targetFaction, 20); // ターゲットへの猛烈なヘイト（好戦化）
+                    window.addHate(f, targetFaction, 20); 
                 }
             });
 
-            // 包囲網参加者同士の打算的な連携（同盟レベル以上にはなりにくい）
             for(let i=0; i<antiFactions.length; i++) {
                 for(let j=i+1; j<antiFactions.length; j++) {
                     let f1 = antiFactions[i], f2 = antiFactions[j];
                     let currentScore = window.getDiplomacyScore(f1, f2);
-                    if (currentScore < 500) { // 同盟ライン未満なら少し歩み寄る
-                        addFriendship(f1, f2, 10); addFriendship(f2, f1, 10);
+                    if (currentScore < 300) { 
+                        window.addFriendship(f1, f2, 10); window.addFriendship(f2, f1, 10);
                     }
                 }
             }
-
             if (GameState.month === 1 && antiFactions.length > 1) {
                 this.log(`<span style="color:#8e44ad; font-weight:bold;">🚨 諸大名が【${FactionMaster[targetFaction].name} 包囲網】を形成し、警戒を強めています！</span>`);
             }
         }
 
-        // 外交感情の減衰
+        // 🌟 呉越同舟（共通の敵を持つ者同士の接近）
+        for(let i=0; i<factions.length; i++) {
+            for(let j=i+1; j<factions.length; j++) {
+                let f1 = factions[i], f2 = factions[j];
+                let hasCommonThreat = false;
+                for(let k=0; k<factions.length; k++) {
+                    let enemy = factions[k];
+                    if (enemy === f1 || enemy === f2) continue;
+                    if ((GameState.hateMatrix[f1]?.[enemy] || 0) >= 200 && (GameState.hateMatrix[f2]?.[enemy] || 0) >= 200) { 
+                        hasCommonThreat = true; break; 
+                    }
+                }
+                if (hasCommonThreat) {
+                    window.addFriendship(f1, f2, 15); window.addFriendship(f2, f1, 15);
+                }
+            }
+        }
+
+        // 🌟 AIの能動的な親善工作
+        factions.forEach(f => {
+            if (f === GameState.playerFaction || f === targetFaction) return;
+            let myCastles = Object.values(GameState.castles).filter(c => c.faction === f);
+            if(myCastles.length === 0) return;
+            let richest = myCastles.reduce((a, b) => a.gold > b.gold ? a : b);
+            
+            if (richest.gold >= 300) {
+                let neighbors = new Set();
+                myCastles.forEach(mc => {
+                    window.graph[mc.id].forEach(edge => {
+                        let nc = GameState.castles[edge.to];
+                        if(nc && nc.faction !== 'independent' && nc.faction !== f) neighbors.add(nc.faction);
+                    });
+                });
+                neighbors.forEach(nf => {
+                    if (nf === targetFaction) return; // 包囲網の的とは親善しない
+                    let score = window.getDiplomacyScore(f, nf);
+                    // 敵対していないが、同盟未満の相手に資金を使って親善
+                    if (score > -50 && score < 300 && richest.gold >= 150) {
+                        richest.gold -= 100;
+                        window.addFriendship(f, nf, 40); window.addFriendship(nf, f, 40);
+                    }
+                });
+            }
+        });
+
+        // 🌟 外交感情の自然減衰
         for (let f1 in GameState.hateMatrix) { for (let f2 in GameState.hateMatrix[f1]) { GameState.hateMatrix[f1][f2] = Math.max(0, GameState.hateMatrix[f1][f2] - 10); } }
         for (let f1 in GameState.friendshipMatrix) { for (let f2 in GameState.friendshipMatrix[f1]) { GameState.friendshipMatrix[f1][f2] = Math.max(0, GameState.friendshipMatrix[f1][f2] - 5); } }
         
+        // 🌟 閾値（150、300、600）での同盟関係の更新
         GameState.alliances = {};
         for(let i=0; i<factions.length; i++) {
             for(let j=i+1; j<factions.length; j++) {
                 let f1 = factions[i], f2 = factions[j];
                 let mutualScore = (window.getDiplomacyScore(f1, f2) + window.getDiplomacyScore(f2, f1)) / 2;
                 let level = 0;
-                if (mutualScore >= 800) level = 3;
-                else if (mutualScore >= 500) level = 2;
-                else if (mutualScore >= 300) level = 1;
+                if (mutualScore >= 600) level = 3;       // 盟友
+                else if (mutualScore >= 300) level = 2;  // 同盟
+                else if (mutualScore >= 150) level = 1;  // 和睦
                 
                 if (level > 0) GameState.alliances[`${f1}-${f2}`] = level;
             }
