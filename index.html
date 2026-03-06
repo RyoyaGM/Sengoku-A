@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>戦国統治シミュレーション - 警戒レベル・非カレンダーAI版</title>
+    <title>戦国統治シミュレーション - UI拡張・不定期出陣版</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <link rel="stylesheet" href="style.css">
 </head>
@@ -10,14 +10,14 @@
 
 <div id="top-bar">
     <div class="file-input-group">
-        <span>① マップデータ</span>
+        <span>① マップ</span>
         <input type="file" id="mapLoader" accept=".json">
     </div>
     <div class="file-input-group">
-        <span>② シナリオデータ</span>
+        <span>② シナリオ</span>
         <input type="file" id="scenarioLoader" accept=".json" disabled>
     </div>
-    <div class="status-item">📅 <span id="ui-season">🌸</span> <span id="ui-date" class="status-value">----年 --月 --日</span></div>
+    <div class="status-item">📅 <span id="ui-season">🌸</span> <span id="ui-date" class="status-value">----</span></div>
     <div class="status-item">💰 <span id="ui-gold" class="status-value">0</span></div>
     <div class="status-item">🌾 <span id="ui-food" class="status-value">0</span></div>
     <div style="flex: 1;"></div>
@@ -25,44 +25,44 @@
         <input type="range" id="speedSlider" min="20" max="300" value="100" style="width: 80px; direction: rtl;" oninput="updateSpeedDisplay()">
         <span id="speedDisplay" style="font-size: 12px; font-weight:bold; color: #f1c40f;">0.10秒</span>
     </div>
-    <button id="btnToggleTime" class="action-btn" style="width: 140px;" onclick="gameEngine.toggleTime()" disabled>▶ 時間を進める</button>
+    <button id="btnToggleTime" class="action-btn" style="width: 120px;" onclick="gameEngine.toggleTime()" disabled>▶ 時間を進める</button>
 </div>
 
 <div id="main-container">
     <div id="map-container">
         <div id="map"></div>
-        <div id="overlay-start" style="position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: rgba(44, 62, 80, 0.9); z-index: 3000; display: flex; flex-direction: column; justify-content: center; align-items: center; color: white;">
+        <button id="toggle-panel-btn" class="panel-toggle-btn" onclick="toggleRightPanel()">◀</button>
+        <div id="overlay-start">
             <h2>戦国統治シミュレーション</h2>
-            <p>1. マップデータ、2. シナリオデータの順に読み込んでください。</p>
+            <p>1. マップ、2. シナリオの順に読込</p>
         </div>
     </div>
     
     <div id="right-panel">
-        <h2 id="panel-title">🏯 城郭情報</h2>
+        <h2 id="panel-title">🏯 情報パネル</h2>
         <div id="info-content"></div>
-        <h2 style="margin-top: 20px;">🌍 勢力順位 <button onclick="toggleStatsModal()" style="width:auto; padding:2px 6px; font-size:10px;">📊 詳細</button></h2>
+        <h2 style="margin-top: 20px;">🌍 勢力 <button onclick="toggleStatsModal()" style="font-size:10px;">📊 統計</button></h2>
         <div id="ranking-content" class="panel-section"></div>
     </div>
-    <div id="toggle-panel-btn" onclick="toggleRightPanel()">▶</div>
 </div>
 
 <div id="log-container">
     <div id="log-header">
-        <div id="log-filters">
-            <button class="filter-btn active" onclick="filterLogs('all', this)">全て</button>
-            <button class="filter-btn" onclick="filterLogs('combat', this)">⚔️戦闘</button>
-            <button class="filter-btn" onclick="filterLogs('diplomacy', this)">🤝外交</button>
-            <button class="filter-btn" onclick="filterLogs('ai', this)">💡戦略</button>
-        </div>
-        <div style="color: #bdc3c7; font-size: 10px; cursor: pointer;" onclick="toggleLogConsole()">▼ ログ開閉</div>
+        <span style="font-size: 11px; font-weight: bold; color: white;">📜 歴史記録</span>
+        <button class="log-filter-btn active" onclick="filterLogs('all', this)">全て</button>
+        <button class="log-filter-btn" onclick="filterLogs('combat', this)">戦闘</button>
+        <button class="log-filter-btn" onclick="filterLogs('diplomacy', this)">外交</button>
+        <button class="log-filter-btn" onclick="filterLogs('ai', this)">動向</button>
+        <div style="flex:1"></div>
+        <button id="toggle-log-btn" style="background:none; border:none; color:white; cursor:pointer;" onclick="toggleLogConsole()">▼</button>
     </div>
     <div id="log-console"></div>
 </div>
 
 <div id="stats-modal" class="modal-hidden">
     <div class="modal-content">
-        <span class="close-btn" onclick="toggleStatsModal()">×</span>
-        <h2 style="border-bottom:none;">📊 諸大名統計帳</h2>
+        <span style="float:right; cursor:pointer; font-size:24px;" onclick="toggleStatsModal()">×</span>
+        <h2>📊 諸大名統計帳</h2>
         <div id="stats-table-container"></div>
     </div>
 </div>
