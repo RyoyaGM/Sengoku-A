@@ -1,4 +1,4 @@
-// --- engine.js: 高度AI ＋ ZOC ＋ すれ抜け（トンネリング）防止 完全版 ---
+// --- engine.js: 高度AI ＋ ZOC ＋ すれ抜け防止 ＋ 迎撃・戦術撤退 完全版 ---
 
 const GameState = {
     isLoaded: false, hasStarted: false, isPaused: true,
@@ -61,7 +61,7 @@ const gameEngine = {
         const pIdx = GameState.priceIndex;
         const isWinter = (GameState.month === 12 || GameState.month <= 2);
 
-        // 🌟 目標喪失時のハイブリッド判断（A:帰還 ＋ C:転進 ＋ 孤立突破）
+        // 目標喪失時のハイブリッド判断
         GameState.armies.forEach(a => {
             if (a.troops <= 0) return;
             if (a.targetNodeId && a.task === 'attack') {
@@ -207,13 +207,23 @@ const gameEngine = {
             if (a.task !== 'retreat' && closestSelf) {
                 let cn = window.rawNodes.find(n => n.id === closestSelf.id);
                 let route = window.findShortestPath(getClosestNode(a.pos).id, cn.id);
+                
+                // 1. 兵糧不足による撤退
                 let daysToReturn = route ? Math.ceil(route.reduce((sum, r) => sum + (r.dist / r.speedMod), 0) / 6.0) : 0;
                 let reqFood = Math.floor((a.troops / 100) * 3.0 * pIdx * (daysToReturn + 5)); 
-                
                 if (a.food < reqFood) {
                     a.task = 'retreat'; a.pathQueue = route || []; a.targetNodeId = closestSelf.id; 
                     a.targetArmyId = null; a.targetLatLng = null;
                     if(a.faction === GameState.playerFaction) this.log(`<span style="color:#e74c3c;">⚠️ 兵糧不足の恐れ！部隊が ${closestSelf.name} へ緊急退却を開始！</span>`);
+                }
+                
+                // 🌟 2. 無謀な攻城からの「戦術的撤退」
+                if (a.task === 'attack' && a.targetNodeId && !isStrictAlly && distToNode < 500) {
+                    if (castleAtNode && a.troops < castleAtNode.troops * 0.6) { // 兵力が城の60%未満になったら逃げる
+                        a.task = 'retreat'; a.pathQueue = route || []; a.targetNodeId = closestSelf.id; 
+                        a.targetArmyId = null; a.targetLatLng = null;
+                        if(a.faction === GameState.playerFaction) this.log(`<span style="color:#e74c3c;">⚠️ 劣勢！部隊が ${castleAtNode.name} の包囲を諦め、退却を開始！</span>`);
+                    }
                 }
             }
 
@@ -248,11 +258,8 @@ const gameEngine = {
             }
         }
 
-        // 🌟 移動ロジックと「ラストマイルの完歩・攻城固定」
         GameState.armies.forEach(a => {
             if (a.troops <= 0) return;
-            
-            // トンネリング（すれ抜け）防止用に移動前の座標を記録
             a.oldPos = { lat: a.pos.lat, lng: a.pos.lng };
             
             if (a.targetArmyId) {
@@ -296,9 +303,7 @@ const gameEngine = {
                 let tNode = window.rawNodes.find(x => x.id === a.targetNodeId);
                 if (tNode) {
                     let dToTarget = map.distance(L.latLng(a.pos.lat, a.pos.lng), L.latLng(tNode.lat, tNode.lng));
-                    if (dToTarget > 50) { 
-                        tLat = tNode.lat; tLng = tNode.lng; spd = 1.0; needsMovement = true;
-                    }
+                    if (dToTarget > 50) { tLat = tNode.lat; tLng = tNode.lng; spd = 1.0; needsMovement = true; }
                 }
             }
 
@@ -353,13 +358,12 @@ const gameEngine = {
             }
         });
 
-        // 🌟 トンネリング（すれ抜け）防止：移動の軌跡をチェックして引き戻し・ロックオン
+        // トンネリング（すれ抜け）防止
         for (let i = 0; i < GameState.armies.length; i++) {
             for (let j = i + 1; j < GameState.armies.length; j++) {
                 let a1 = GameState.armies[i], a2 = GameState.armies[j];
                 if (a1.troops <= 0 || a2.troops <= 0 || window.areAllies(a1.faction, a2.faction)) continue;
 
-                // 移動前(oldPos)から移動後(pos)までの軌跡を10分割してシミュレート
                 let collisionT = -1;
                 for (let step = 0; step <= 10; step++) {
                     let t = step / 10.0;
@@ -371,20 +375,15 @@ const gameEngine = {
                         a2.oldPos.lat + (a2.pos.lat - a2.oldPos.lat) * t,
                         a2.oldPos.lng + (a2.pos.lng - a2.oldPos.lng) * t
                     );
-                    if (map.distance(p1, p2) < 1000) { // 途中で1000m以内（合戦圏内）に入ったか？
-                        collisionT = t;
-                        break;
-                    }
+                    if (map.distance(p1, p2) < 1000) { collisionT = t; break; }
                 }
 
                 if (collisionT >= 0) {
-                    // 衝突した瞬間の座標（すれ違う前）にお互いを強制的に引き戻す
                     a1.pos.lat = a1.oldPos.lat + (a1.pos.lat - a1.oldPos.lat) * collisionT;
                     a1.pos.lng = a1.oldPos.lng + (a1.pos.lng - a1.oldPos.lng) * collisionT;
                     a2.pos.lat = a2.oldPos.lat + (a2.pos.lat - a2.oldPos.lat) * collisionT;
                     a2.pos.lng = a2.oldPos.lng + (a2.pos.lng - a2.oldPos.lng) * collisionT;
                     
-                    // 足を止めてお互いをターゲット（ロックオン）する
                     a1.pathQueue = []; a2.pathQueue = [];
                     a1.targetLatLng = null; a2.targetLatLng = null;
                     a1.targetNodeId = null; a2.targetNodeId = null;
@@ -436,25 +435,35 @@ const gameEngine = {
                     army.pathQueue = []; army.targetLatLng = null; army.targetArmyId = null;
                     army.targetNodeId = castle.id; army.task = 'attack'; // ZOC: 敵城で強制ストップ
                     
-                    if (castle.siegeHP > 0) {
-                        let dmg = Math.floor(army.troops * 0.05); castle.siegeHP -= dmg;
-                        army.troops -= Math.floor(castle.troops * 0.02);
-                        if(GameState.day % 5 === 0) window.showFloatingText(node.lat, node.lng, "攻城");
+                    // 🌟 1. 城兵の迎撃（打って出る）
+                    if (castle.troops > army.troops * 1.2) {
+                        // 城兵が敵軍の1.2倍以上いる場合、城壁に頼らず野戦を挑む
+                        let dmgToArmy = Math.floor(castle.troops * 0.08); // 城側からの強烈なダメージ
+                        let dmgToCastle = Math.floor(army.troops * 0.04);
+                        army.troops -= dmgToArmy;
+                        castle.troops -= dmgToCastle;
+                        if(GameState.day % 5 === 0) window.showFloatingText(node.lat, node.lng, "迎撃", "#3498db");
                     } else {
-                        if (army.troops > castle.troops * 1.5) {
-                            army.gold += castle.gold; army.food += castle.food;
-                            castle.gold = 0; castle.food = 0;
-                            castle.faction = army.faction; castle.troops = Math.floor(army.troops * 0.6);
-                            army.troops = 0; castle.siegeHP = castle.maxSiegeHP * 0.2;
-                            this.log(`🎊 ${FactionMaster[army.faction].name} が ${castle.name} を占領！`);
-                            drawMap();
+                        // 通常の攻城戦
+                        if (castle.siegeHP > 0) {
+                            let dmg = Math.floor(army.troops * 0.05); castle.siegeHP -= dmg;
+                            army.troops -= Math.floor(castle.troops * 0.02);
+                            if(GameState.day % 5 === 0) window.showFloatingText(node.lat, node.lng, "攻城");
+                        } else {
+                            if (army.troops > castle.troops * 1.5) {
+                                army.gold += castle.gold; army.food += castle.food;
+                                castle.gold = 0; castle.food = 0;
+                                castle.faction = army.faction; castle.troops = Math.floor(army.troops * 0.6);
+                                army.troops = 0; castle.siegeHP = castle.maxSiegeHP * 0.2;
+                                this.log(`🎊 ${FactionMaster[army.faction].name} が ${castle.name} を占領！`);
+                                drawMap();
+                            }
                         }
                     }
                 }
             }
         });
 
-        // 野戦時のダメージ処理（すれ抜け防止により確実に実行される）
         for(let i=0; i<GameState.armies.length; i++) {
             for(let j=i+1; j<GameState.armies.length; j++) {
                 let a1 = GameState.armies[i], a2 = GameState.armies[j];
