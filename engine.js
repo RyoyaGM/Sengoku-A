@@ -1,10 +1,11 @@
-// --- engine.js: 高度AI ＋ 物理兵站制限 ＋ 多極包囲網 ＋ 外交摩擦 完全版 ---
+// --- engine.js: 高度AI ＋ マップのオートスケール ＋ 多極包囲網 完全版 ---
 
 const GameState = {
     isLoaded: false, hasStarted: false, isPaused: true,
     year: 1560, month: 1, day: 1, castles: {}, armies: [], armyIdCounter: 1,
     playerFaction: null, alliances: {}, hateMatrix: {}, friendshipMatrix: {},
-    priceIndex: 1.0, tasks: [] 
+    priceIndex: 1.0, tasks: [],
+    strategicRange: null, maxMarchDays: null // 🌟 動的スケール用の変数を追加
 };
 
 window.getAllianceLevel = function(f1, f2) {
@@ -56,12 +57,50 @@ const gameEngine = {
         setTimeout(() => this.gameLoop(), parseInt(document.getElementById('speedSlider').value));
     },
 
+    // 🌟 マップの平均距離を算出し、遠征の限界値を自動決定する関数
+    calculateMapScale: function() {
+        let totalDist = 0;
+        let count = 0;
+        let castles = Object.values(GameState.castles);
+        
+        castles.forEach(c => {
+            let cn = window.rawNodes.find(n => n.id === c.id);
+            if (!cn) return;
+            let minDist = Infinity;
+            castles.forEach(other => {
+                if (c.id === other.id) return;
+                let otherN = window.rawNodes.find(n => n.id === other.id);
+                if (!otherN) return;
+                let d = map.distance(L.latLng(cn.lat, cn.lng), L.latLng(otherN.lat, otherN.lng));
+                if (d < minDist) minDist = d;
+            });
+            if (minDist !== Infinity) {
+                totalDist += minDist;
+                count++;
+            }
+        });
+        
+        let avgDist = count > 0 ? (totalDist / count) : 30000;
+        
+        // 射程は平均距離の4倍（隣接拠点のさらに数個先までを許容）
+        GameState.strategicRange = Math.max(30000, avgDist * 4);
+        
+        // 悪路を考慮し、平均行軍速度を 3.0km/日 として到達限界日数を計算
+        GameState.maxMarchDays = Math.max(20, Math.ceil((GameState.strategicRange / 1000) / 3.0));
+        
+        console.log(`[マップ解析完了] 平均城間距離: ${Math.round(avgDist/1000)}km, 戦略射程: ${Math.round(GameState.strategicRange/1000)}km, 限界日数: ${GameState.maxMarchDays}日`);
+    },
+
     tickDay: function() {
-        this.runAI(); // 分散AI呼び出し
+        // 🌟 初回起動時にマップスケールを計算
+        if (!GameState.strategicRange) {
+            this.calculateMapScale();
+        }
+
+        this.runAI(); 
         const pIdx = GameState.priceIndex;
         const isWinter = (GameState.month === 12 || GameState.month <= 2);
 
-        // 目標喪失時のハイブリッド判断
         GameState.armies.forEach(a => {
             if (a.troops <= 0) return;
             if (a.targetNodeId && a.task === 'attack') {
@@ -536,7 +575,7 @@ const gameEngine = {
             }
         });
 
-        // 2. ターゲット選定と出陣（物理距離と行軍日数の限界を設定）
+        // 2. ターゲット選定と出陣（オートスケール対応）
         Object.values(GameState.castles).forEach(c => {
             if(c.faction === 'independent' || (GameState.playerFaction && c.faction === GameState.playerFaction)) return;
             
@@ -552,14 +591,15 @@ const gameEngine = {
                     let dist = map.distance(L.latLng(cN.lat, cN.lng), L.latLng(tN.lat, tN.lng));
                     return { castle: t, dist: dist };
                 })
-                // 🌟 絶対射程距離：30km(30,000m)を超える城はそもそも狙わない（遠征防止）
-                .filter(cand => cand.dist <= 30000)
+                // 🌟 マップに応じた絶対射程で足切り
+                .filter(cand => cand.dist <= GameState.strategicRange)
                 .sort((a, b) => a.dist - b.dist)
                 .slice(0, 5);
 
+            // 近くの城(射程の60%以内)の空き巣チェック
             let hasChance = candidates.some(cand => {
                 let enemyPower = cand.castle.troops + (cand.castle.siegeHP * 0.5);
-                return enemyPower < (deployTroops * 0.3);
+                return cand.dist <= (GameState.strategicRange * 0.6) && enemyPower < (deployTroops * 0.3);
             });
 
             let launchProb = hasChance ? 0.60 : 0.05;
@@ -583,8 +623,8 @@ const gameEngine = {
                 let totalCost = route.reduce((sum, r) => sum + (r.dist / r.speedMod), 0);
                 let daysToTarget = Math.ceil(totalCost / 6.0);
                 
-                // 🌟 行軍日数制限：片道20日以上かかる場合は兵站維持不能と判断し除外
-                if (daysToTarget >= 20) return;
+                // 🌟 マップのスケールに応じた行軍日数制限
+                if (daysToTarget >= GameState.maxMarchDays) return;
 
                 let estFood = Math.floor((deployTroops / 100) * 4.0 * pIdx * (daysToTarget * 2 + 40));
                 if (c.food < estFood) return;
@@ -593,10 +633,11 @@ const gameEngine = {
                 if (deployTroops < enemyPower * 1.2 && targetCastle.faction !== 'independent') return;
 
                 let hateBonus = (GameState.hateMatrix[c.faction]?.[targetCastle.faction] || 0) * 10;
-                let chanceBonus = (enemyPower < deployTroops * 0.3) ? 10000 : 0;
+                let chanceBonus = (enemyPower < deployTroops * 0.3 && cand.dist <= (GameState.strategicRange * 0.6)) ? 10000 : 0;
                 
-                // 🌟 距離減衰を「二乗」にして、遠距離のスコアを激減させる
-                let distSq = Math.pow(cand.dist / 1000, 2) + 1;
+                // 🌟 距離減衰（マップスケールに応じて縮尺を調整した二乗則）
+                let baseDist = GameState.strategicRange / 3;
+                let distSq = Math.pow(cand.dist / baseDist, 2) + 1;
                 let score = (10000 / distSq) - enemyPower + hateBonus + chanceBonus;
                 
                 if (score > bestScore) { bestScore = score; bestTarget = { id: targetCastle.id, route: route }; bestFoodReq = estFood; }
@@ -728,7 +769,8 @@ const gameEngine = {
                         let mN = window.rawNodes.find(n => n.id === mc.id);
                         for(let tc of targetCastles) {
                             let tN = window.rawNodes.find(n => n.id === tc.id);
-                            if (map.distance(L.latLng(mN.lat, mN.lng), L.latLng(tN.lat, tN.lng)) < 60000) { isNear = true; break; }
+                            // 距離判定もスケールに依存させる
+                            if (map.distance(L.latLng(mN.lat, mN.lng), L.latLng(tN.lat, tN.lng)) < GameState.strategicRange * 1.5) { isNear = true; break; }
                         }
                         if(isNear) break;
                     }
