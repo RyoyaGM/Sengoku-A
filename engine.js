@@ -1,4 +1,4 @@
-// --- engine.js: 5段階警戒レベル・高度AI（迷子復旧・ラストマイル完歩）完全版 ---
+// --- engine.js: 高度AI ＋ ZOC（素通り防止・迎撃ロックオン）完全版 ---
 
 const GameState = {
     isLoaded: false, hasStarted: false, isPaused: true,
@@ -291,7 +291,6 @@ const gameEngine = {
                 if(ta) { tLat = ta.pos.lat; tLng = ta.pos.lng; needsMovement = true; }
             }
             else if (a.targetNodeId) {
-                // 🌟 [修正ポイント] 経路が空でも、まだ目的地から少し離れていれば直接歩き続ける（ラストマイルの完歩）
                 let tNode = window.rawNodes.find(x => x.id === a.targetNodeId);
                 if (tNode) {
                     let dToTarget = map.distance(L.latLng(a.pos.lat, a.pos.lng), L.latLng(tNode.lat, tNode.lng));
@@ -302,11 +301,9 @@ const gameEngine = {
             }
 
             if (!needsMovement) {
-                // 完全に到着している、あるいは本当に目標が無い場合の仕分け処理
-                
                 if (a.task === 'attack' && a.targetNodeId) {
                     let tNode = window.rawNodes.find(nx => nx.id === a.targetNodeId);
-                    if (tNode && map.distance(L.latLng(a.pos), L.latLng(tNode.lat, tNode.lng)) < 500) return; // 攻城固定
+                    if (tNode && map.distance(L.latLng(a.pos), L.latLng(tNode.lat, tNode.lng)) < 500) return; 
                 }
 
                 if (a.task === 'hold' && a.targetLatLng) return;
@@ -314,7 +311,7 @@ const gameEngine = {
 
                 if (a.task === 'retreat' && a.targetNodeId) {
                     let tNode = window.rawNodes.find(nx => nx.id === a.targetNodeId);
-                    if (tNode && map.distance(L.latLng(a.pos), L.latLng(tNode.lat, tNode.lng)) < 200) return; // 吸収待ち
+                    if (tNode && map.distance(L.latLng(a.pos), L.latLng(tNode.lat, tNode.lng)) < 200) return; 
                 }
 
                 a.task = 'retreat';
@@ -338,7 +335,6 @@ const gameEngine = {
                 return; 
             }
 
-            // 移動の実行
             let speedModByTroops = Math.max(0.5, Math.min(1.2, 1.2 - (a.troops / 20000)));
             let baseSpd = 6.0;
             if (a.task === 'transport') baseSpd = 3.0; 
@@ -357,7 +353,6 @@ const gameEngine = {
             }
         });
 
-        // 合流
         for (let i = 0; i < GameState.armies.length; i++) {
             for (let j = i + 1; j < GameState.armies.length; j++) {
                 let a1 = GameState.armies[i], a2 = GameState.armies[j];
@@ -391,13 +386,18 @@ const gameEngine = {
             const castle = GameState.castles[node.id]; if(!castle) return;
 
             if (map.distance(L.latLng(army.pos), L.latLng(node.lat, node.lng)) < 200) {
-                // 自勢力の城なら合流して消滅
                 if (castle.faction === army.faction) {
                     if (army.task === 'transport' || (army.pathQueue.length === 0 && !army.targetLatLng && !army.targetArmyId) || army.task === 'retreat') {
                         castle.troops += army.troops; castle.gold += army.gold; castle.food += army.food; army.troops = 0;
                     }
                 } else if (!window.areAllies(army.faction, castle.faction)) {
-                    army.pathQueue = []; army.targetLatLng = null; army.targetArmyId = null;
+                    // 🌟 素通り防止（ZOC強制ロックオン）
+                    army.pathQueue = []; 
+                    army.targetLatLng = null; 
+                    army.targetArmyId = null;
+                    army.targetNodeId = castle.id; // 通り道の敵城を強制的にターゲットに書き換え
+                    army.task = 'attack';          // 任務を攻撃に変更して足を止める
+
                     if (castle.siegeHP > 0) {
                         let dmg = Math.floor(army.troops * 0.05); castle.siegeHP -= dmg;
                         army.troops -= Math.floor(castle.troops * 0.02);
@@ -416,6 +416,7 @@ const gameEngine = {
             }
         });
 
+        // 🌟 野戦時の素通り防止（部隊同士の強制ロックオン）
         for(let i=0; i<GameState.armies.length; i++) {
             for(let j=i+1; j<GameState.armies.length; j++) {
                 let a1 = GameState.armies[i], a2 = GameState.armies[j];
@@ -434,7 +435,13 @@ const gameEngine = {
                         winner.gold += sG; winner.food += sF; loser.gold = 0; loser.food = 0;
                     }
                     
-                    a1.pathQueue = []; a2.pathQueue = []; a1.targetLatLng = null; a2.targetLatLng = null;
+                    // お互いをターゲットに設定して死ぬまで戦わせる
+                    a1.pathQueue = []; a2.pathQueue = []; 
+                    a1.targetLatLng = null; a2.targetLatLng = null;
+                    a1.targetNodeId = null; a2.targetNodeId = null;
+                    a1.targetArmyId = a2.id; a2.targetArmyId = a1.id;
+                    a1.task = 'attack'; a2.task = 'attack';
+                    
                     window.addHate(a1.faction, a2.faction, 10); window.addHate(a2.faction, a1.faction, 10);
                     
                     [a1, a2].forEach(target => {
@@ -559,7 +566,6 @@ const gameEngine = {
 
         const factions = Object.keys(FactionMaster).filter(f => f !== 'independent');
 
-        // 5段階の警戒レベルと包囲網システム
         let factionKokudaka = {}; let totalKoku = 0;
         Object.values(GameState.castles).forEach(c => {
             if(c.faction !== 'independent') {
@@ -658,7 +664,6 @@ const gameEngine = {
             }
         }
 
-        // 呉越同舟
         for(let i=0; i<factions.length; i++) {
             for(let j=i+1; j<factions.length; j++) {
                 let f1 = factions[i], f2 = factions[j];
@@ -676,7 +681,6 @@ const gameEngine = {
             }
         }
 
-        // AIの能動的親善
         factions.forEach(f => {
             if (f === GameState.playerFaction || f === targetFaction) return;
             let myCastles = Object.values(GameState.castles).filter(c => c.faction === f);
