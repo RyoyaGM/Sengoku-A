@@ -1,4 +1,4 @@
-// --- engine.js: ソート復元・クラッシュ完全防止・兵站ロジック統合版 ---
+// --- engine.js: 地形・状態による可変兵糧消費と自動撤退の統合版 ---
 
 const GameState = {
     isLoaded: false, hasStarted: false, isPaused: true,
@@ -51,19 +51,60 @@ const gameEngine = {
     tickDay: function() {
         if (GameState.day === 1) this.runAI();
         const pIdx = GameState.priceIndex;
+        const isWinter = (GameState.month === 12 || GameState.month <= 2);
 
-        // 🌟 城と部隊の兵糧消費（餓死判定）
+        // 🌟 城の消費（駐屯兵: 0.3/日）
         Object.values(GameState.castles).forEach(c => {
             if(c.faction === 'independent') return;
-            c.food -= Math.floor((c.troops / 100) * 1 * pIdx);
+            c.food -= Math.floor((c.troops / 100) * 0.3 * pIdx);
             if (c.food <= 0) { c.food = 0; c.troops = Math.max(0, Math.floor(c.troops * 0.95)); }
         });
+
+        // 🌟 部隊の消費（地勢と行動状態による変化）と退却判定
         GameState.armies.forEach(a => {
-            a.food -= Math.floor((a.troops / 100) * 3 * pIdx);
+            if (a.troops <= 0) return;
+            let node = getClosestNode(a.pos);
+            let isAllyTerritory = (node && node.type !== "5" && node.type !== "0") ? areAllies(a.faction, GameState.castles[node.id].faction) : false;
+            
+            let baseRate = 3.0; // デフォルト行軍
+            if (a.task === 'retreat') baseRate = isAllyTerritory ? 2.0 : 3.0;
+            else if (a.task === 'hold') baseRate = isAllyTerritory ? 1.0 : 2.0;
+            else baseRate = isAllyTerritory ? 3.0 : 4.0;
+            
+            // 包囲・交戦中（目標に到着して止まっている場合）
+            if (a.task === 'attack' && !a.pathQueue.length && !a.targetLatLng && !a.targetArmyId) baseRate = 5.0;
+
+            a.food -= Math.floor((a.troops / 100) * baseRate * pIdx);
             if (a.food <= 0) {
                 a.food = 0;
                 a.troops = Math.max(0, a.troops - Math.max(1, Math.floor(a.troops * 0.05)));
                 if(GameState.day % 10 === 0) window.showFloatingText(a.pos.lat, a.pos.lng, "飢餓", "#e74c3c");
+            }
+
+            // 🌟 帰還限界点（退却）の判定
+            if (a.task !== 'retreat') {
+                let closestAlly = null; let minDist = Infinity;
+                Object.values(GameState.castles).forEach(c => {
+                    if (areAllies(c.faction, a.faction)) {
+                        let cn = window.rawNodes.find(n => n.id === c.id);
+                        let d = map.distance(L.latLng(a.pos.lat, a.pos.lng), L.latLng(cn.lat, cn.lng));
+                        if (d < minDist) { minDist = d; closestAlly = c; }
+                    }
+                });
+                if (closestAlly) {
+                    let cn = window.rawNodes.find(n => n.id === closestAlly.id);
+                    let route = window.findShortestPath(getClosestNode(a.pos).id, cn.id);
+                    let days = route ? Math.ceil(route.reduce((sum, r) => sum + (r.dist / r.speedMod), 0) / 6.0) : 0;
+                    let reqFood = Math.floor((a.troops / 100) * 3 * pIdx * (days + 5)); // 帰還までの日数＋5日分の余裕
+                    if (a.food < reqFood) {
+                        a.task = 'retreat';
+                        a.pathQueue = route || [];
+                        a.targetNodeId = closestAlly.id;
+                        a.targetArmyId = null;
+                        a.targetLatLng = null;
+                        if(a.faction === GameState.playerFaction) this.log(`<span style="color:#e74c3c;">⚠️ 兵糧不足！部隊が ${closestAlly.name} へ退却を開始しました！</span>`);
+                    }
+                }
             }
         });
 
@@ -82,7 +123,7 @@ const gameEngine = {
             }
         }
 
-        // 🌟 移動・動的追尾ロジック
+        // 🌟 移動ロジック（兵力による速度の変化）
         GameState.armies.forEach(a => {
             if (a.troops <= 0) return;
             if (a.targetArmyId) {
@@ -99,10 +140,14 @@ const gameEngine = {
             else if (a.targetArmyId) { let ta = GameState.armies.find(x => x.id === a.targetArmyId); tLat = ta.pos.lat; tLng = ta.pos.lng; }
             else return;
 
+            // 兵数による速度ペナルティ（大軍ほど遅い）
+            let speedModByTroops = Math.max(0.5, Math.min(1.2, 1.2 - (a.troops / 20000)));
+            let baseSpd = 6.0;
+            if (a.task === 'transport') baseSpd = 3.0; // 輸送隊は遅い
+            else if (a.task === 'retreat') baseSpd = 7.8; // 退却は速い
+            
+            let move = baseSpd * speedModByTroops * (isWinter ? 0.5 : 1.0) * spd;
             let d = map.distance(L.latLng(a.pos.lat, a.pos.lng), L.latLng(tLat, tLng)) / 1000;
-            // 輸送隊は速度0.5倍
-            let moveBase = (a.task==='transport' ? 3.0 : 6.0) * (GameState.month <= 2 || GameState.month === 12 ? 0.5 : 1.0);
-            let move = moveBase * spd;
             
             if (move >= d) {
                 a.pos = { lat: tLat, lng: tLng };
@@ -114,11 +159,13 @@ const gameEngine = {
             }
         });
 
-        // 🌟 合流（目標が城の場合は包囲を意図しているため合流しない）
+        // 🌟 合流（退却中は合流しない、目標が城の場合は包囲を意図しているため合流しない）
         for (let i = 0; i < GameState.armies.length; i++) {
             for (let j = i + 1; j < GameState.armies.length; j++) {
                 let a1 = GameState.armies[i], a2 = GameState.armies[j];
                 if (a1.troops <= 0 || a2.troops <= 0 || a1.faction !== a2.faction) continue;
+                if (a1.task === 'retreat' || a2.task === 'retreat') continue; // 退却中は無視
+
                 if (map.distance(L.latLng(a1.pos), L.latLng(a2.pos)) < 500) {
                     if (a1.task==='transport' || a2.task==='transport') {
                         let t = a1.task==='transport'?a1:a2, r = a1.task==='transport'?a2:a1;
@@ -171,7 +218,7 @@ const gameEngine = {
             }
         });
 
-        // 🌟 野戦と略奪の計算
+        // 野戦と略奪の計算
         for(let i=0; i<GameState.armies.length; i++) {
             for(let j=i+1; j<GameState.armies.length; j++) {
                 let a1 = GameState.armies[i], a2 = GameState.armies[j];
@@ -193,7 +240,7 @@ const gameEngine = {
                     a1.pathQueue = []; a2.pathQueue = []; a1.targetLatLng = null; a2.targetLatLng = null;
                     addHate(a1.faction, a2.faction, 10); addHate(a2.faction, a1.faction, 10);
                     
-                    // 🌟 クラッシュ防止済みの支援射撃チェック（城ノードのみ）
+                    // 支援射撃（城ノードのみ）
                     [a1, a2].forEach(target => {
                         const nearby = getClosestNode(target.pos);
                         if (nearby && nearby.type !== "5" && nearby.type !== "0") { 
@@ -241,20 +288,15 @@ const gameEngine = {
             }
         });
 
-        // 🌟 2. ターゲット選定（距離ソートによる二条御所殺到の防止）
+        // 🌟 2. ターゲット選定と厳密な兵糧計算
         Object.values(GameState.castles).forEach(c => {
             if(c.faction === 'independent' || (GameState.playerFaction && c.faction === GameState.playerFaction)) return;
             
             let deployTroops = Math.floor(c.troops * 0.7);
             if (deployTroops < 500) return;
-            
-            // 必要な物資を計算（90日分）
-            let estFood = Math.floor((deployTroops / 100) * 3 * pIdx * 90);
-            if (c.food < estFood) return; // 備蓄不足は出陣しない
 
             const cN = window.rawNodes.find(n => n.id === c.id);
             
-            // 全敵城を距離でソートして候補を作成
             let candidates = Object.values(GameState.castles)
                 .filter(t => t.faction !== c.faction && !areAllies(c.faction, t.faction))
                 .map(t => {
@@ -263,23 +305,33 @@ const gameEngine = {
                     return { castle: t, dist: dist };
                 })
                 .sort((a, b) => a.dist - b.dist)
-                .slice(0, 5); // 最も近い5城をピックアップ
+                .slice(0, 5);
 
-            let bestTarget = null; let bestScore = -Infinity;
+            let bestTarget = null; let bestScore = -Infinity; let bestFoodReq = 0;
             candidates.forEach(cand => {
                 let targetCastle = cand.castle;
                 let route = findShortestPath(c.id, targetCastle.id);
                 if (!route) return;
 
+                // 往復にかかる日数を計算（約6.0の速度をベースに）
+                let totalCost = route.reduce((sum, r) => sum + (r.dist / r.speedMod), 0);
+                let daysToTarget = Math.ceil(totalCost / 6.0);
+                
+                // 必要兵糧 ＝ (往復日数 + 攻城30日 + 予備10日) × 敵地消費レート(4)
+                let estFood = Math.floor((deployTroops / 100) * 4.0 * pIdx * (daysToTarget * 2 + 40));
+                
+                // 蔵の兵糧が足りないなら除外
+                if (c.food < estFood) return;
+
                 let enemyPower = targetCastle.troops + (targetCastle.siegeHP * 0.5);
                 if (deployTroops < enemyPower * 1.2 && targetCastle.faction !== 'independent') return;
 
                 let score = (10000 / (cand.dist + 1)) - enemyPower;
-                if (score > bestScore) { bestScore = score; bestTarget = { id: targetCastle.id, route: route }; }
+                if (score > bestScore) { bestScore = score; bestTarget = { id: targetCastle.id, route: route }; bestFoodReq = estFood; }
             });
 
             if (bestTarget) {
-                let a = window.deployArmy(c.id, deployTroops, true, 'attack', 0, estFood);
+                let a = window.deployArmy(c.id, deployTroops, true, 'attack', 0, bestFoodReq);
                 if (a) {
                     a.pathQueue = bestTarget.route; a.targetNodeId = bestTarget.id;
                     this.log(`<span class="log-ai">【出陣】${FactionMaster[c.faction].name} が ${GameState.castles[bestTarget.id].name} へ侵攻開始！</span>`);
@@ -296,11 +348,10 @@ const gameEngine = {
             if (c.faction === "independent") return;
             c.gold += Math.floor(c.commerce * 0.2 * pIdx);
             if(isHarvest) c.food += Math.floor(c.currentKokudaka * 1.0 * pIdx);
-            c.food = Math.min(c.food, c.currentKokudaka * 5); // 備蓄上限
+            c.food = Math.min(c.food, c.currentKokudaka * 15); // 上限を石高の15倍に
             let max = getMaxTroops(c); if(c.troops < max) c.troops += Math.floor(max * 0.05);
         });
 
-        // 外交感情の減衰と同盟更新
         for (let f1 in GameState.hateMatrix) { for (let f2 in GameState.hateMatrix[f1]) { GameState.hateMatrix[f1][f2] = Math.max(0, GameState.hateMatrix[f1][f2] - 10); } }
         for (let f1 in GameState.friendshipMatrix) { for (let f2 in GameState.friendshipMatrix[f1]) { GameState.friendshipMatrix[f1][f2] = Math.max(0, GameState.friendshipMatrix[f1][f2] - 5); } }
         
