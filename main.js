@@ -390,7 +390,6 @@ function updateRightPanel() {
             }
         }
         
-        // 🌟 外交パネル（他国の城を選択した場合）
         let diploHtml = '';
         if (GameState.playerFaction !== null && c.faction !== "independent" && c.faction !== GameState.playerFaction) {
             let score = window.getDiplomacyScore(GameState.playerFaction, c.faction);
@@ -415,7 +414,6 @@ function updateRightPanel() {
     }
 }
 
-// 🌟 プレイヤーの能動的な外交工作コマンド
 window.sendGoodwill = function(targetFaction) {
     if(GameState.playerFaction === null) return;
     let myCastles = Object.values(GameState.castles).filter(c => c.faction === GameState.playerFaction);
@@ -435,7 +433,6 @@ window.sendGoodwill = function(targetFaction) {
     updateUI(); drawMap();
 };
 
-// 🌟 手切れ（同盟破棄による世界中からの信用失墜）
 window.breakAlliance = function(targetFaction) {
     if(!confirm(`${FactionMaster[targetFaction].name} との同盟を破棄しますか？\n信を違えたとして、世界中からの評価が激減します。`)) return;
     
