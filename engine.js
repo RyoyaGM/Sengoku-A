@@ -1,4 +1,4 @@
-// --- engine.js: 高度AI ＋ ZOC（素通り防止・迎撃ロックオン）完全版 ---
+// --- engine.js: 高度AI ＋ ZOC ＋ すれ抜け（トンネリング）防止 完全版 ---
 
 const GameState = {
     isLoaded: false, hasStarted: false, isPaused: true,
@@ -252,6 +252,9 @@ const gameEngine = {
         GameState.armies.forEach(a => {
             if (a.troops <= 0) return;
             
+            // トンネリング（すれ抜け）防止用に移動前の座標を記録
+            a.oldPos = { lat: a.pos.lat, lng: a.pos.lng };
+            
             if (a.targetArmyId) {
                 let ta = GameState.armies.find(x => x.id === a.targetArmyId);
                 if (!ta || ta.troops <= 0) { a.targetArmyId = null; a.pathQueue = []; a.task = 'retreat'; }
@@ -264,7 +267,6 @@ const gameEngine = {
             let currentNode = getClosestNode(a.pos);
             let distToCurrentNode = map.distance(L.latLng(a.pos), L.latLng(currentNode.lat, currentNode.lng));
 
-            // 迷子復旧処理
             if (a.pathQueue.length === 0 && a.targetNodeId && a.task !== 'hold') {
                 let targetNode = window.rawNodes.find(n => n.id === a.targetNodeId);
                 if (targetNode) {
@@ -305,10 +307,8 @@ const gameEngine = {
                     let tNode = window.rawNodes.find(nx => nx.id === a.targetNodeId);
                     if (tNode && map.distance(L.latLng(a.pos), L.latLng(tNode.lat, tNode.lng)) < 500) return; 
                 }
-
                 if (a.task === 'hold' && a.targetLatLng) return;
                 if (a.task === 'hold' && distToCurrentNode < 500) return;
-
                 if (a.task === 'retreat' && a.targetNodeId) {
                     let tNode = window.rawNodes.find(nx => nx.id === a.targetNodeId);
                     if (tNode && map.distance(L.latLng(a.pos), L.latLng(tNode.lat, tNode.lng)) < 200) return; 
@@ -353,6 +353,48 @@ const gameEngine = {
             }
         });
 
+        // 🌟 トンネリング（すれ抜け）防止：移動の軌跡をチェックして引き戻し・ロックオン
+        for (let i = 0; i < GameState.armies.length; i++) {
+            for (let j = i + 1; j < GameState.armies.length; j++) {
+                let a1 = GameState.armies[i], a2 = GameState.armies[j];
+                if (a1.troops <= 0 || a2.troops <= 0 || window.areAllies(a1.faction, a2.faction)) continue;
+
+                // 移動前(oldPos)から移動後(pos)までの軌跡を10分割してシミュレート
+                let collisionT = -1;
+                for (let step = 0; step <= 10; step++) {
+                    let t = step / 10.0;
+                    let p1 = L.latLng(
+                        a1.oldPos.lat + (a1.pos.lat - a1.oldPos.lat) * t,
+                        a1.oldPos.lng + (a1.pos.lng - a1.oldPos.lng) * t
+                    );
+                    let p2 = L.latLng(
+                        a2.oldPos.lat + (a2.pos.lat - a2.oldPos.lat) * t,
+                        a2.oldPos.lng + (a2.pos.lng - a2.oldPos.lng) * t
+                    );
+                    if (map.distance(p1, p2) < 1000) { // 途中で1000m以内（合戦圏内）に入ったか？
+                        collisionT = t;
+                        break;
+                    }
+                }
+
+                if (collisionT >= 0) {
+                    // 衝突した瞬間の座標（すれ違う前）にお互いを強制的に引き戻す
+                    a1.pos.lat = a1.oldPos.lat + (a1.pos.lat - a1.oldPos.lat) * collisionT;
+                    a1.pos.lng = a1.oldPos.lng + (a1.pos.lng - a1.oldPos.lng) * collisionT;
+                    a2.pos.lat = a2.oldPos.lat + (a2.pos.lat - a2.oldPos.lat) * collisionT;
+                    a2.pos.lng = a2.oldPos.lng + (a2.pos.lng - a2.oldPos.lng) * collisionT;
+                    
+                    // 足を止めてお互いをターゲット（ロックオン）する
+                    a1.pathQueue = []; a2.pathQueue = [];
+                    a1.targetLatLng = null; a2.targetLatLng = null;
+                    a1.targetNodeId = null; a2.targetNodeId = null;
+                    a1.targetArmyId = a2.id; a2.targetArmyId = a1.id;
+                    a1.task = 'attack'; a2.task = 'attack';
+                }
+            }
+        }
+
+        // 合流
         for (let i = 0; i < GameState.armies.length; i++) {
             for (let j = i + 1; j < GameState.armies.length; j++) {
                 let a1 = GameState.armies[i], a2 = GameState.armies[j];
@@ -391,13 +433,9 @@ const gameEngine = {
                         castle.troops += army.troops; castle.gold += army.gold; castle.food += army.food; army.troops = 0;
                     }
                 } else if (!window.areAllies(army.faction, castle.faction)) {
-                    // 🌟 素通り防止（ZOC強制ロックオン）
-                    army.pathQueue = []; 
-                    army.targetLatLng = null; 
-                    army.targetArmyId = null;
-                    army.targetNodeId = castle.id; // 通り道の敵城を強制的にターゲットに書き換え
-                    army.task = 'attack';          // 任務を攻撃に変更して足を止める
-
+                    army.pathQueue = []; army.targetLatLng = null; army.targetArmyId = null;
+                    army.targetNodeId = castle.id; army.task = 'attack'; // ZOC: 敵城で強制ストップ
+                    
                     if (castle.siegeHP > 0) {
                         let dmg = Math.floor(army.troops * 0.05); castle.siegeHP -= dmg;
                         army.troops -= Math.floor(castle.troops * 0.02);
@@ -416,7 +454,7 @@ const gameEngine = {
             }
         });
 
-        // 🌟 野戦時の素通り防止（部隊同士の強制ロックオン）
+        // 野戦時のダメージ処理（すれ抜け防止により確実に実行される）
         for(let i=0; i<GameState.armies.length; i++) {
             for(let j=i+1; j<GameState.armies.length; j++) {
                 let a1 = GameState.armies[i], a2 = GameState.armies[j];
@@ -435,13 +473,7 @@ const gameEngine = {
                         winner.gold += sG; winner.food += sF; loser.gold = 0; loser.food = 0;
                     }
                     
-                    // お互いをターゲットに設定して死ぬまで戦わせる
-                    a1.pathQueue = []; a2.pathQueue = []; 
-                    a1.targetLatLng = null; a2.targetLatLng = null;
-                    a1.targetNodeId = null; a2.targetNodeId = null;
-                    a1.targetArmyId = a2.id; a2.targetArmyId = a1.id;
-                    a1.task = 'attack'; a2.task = 'attack';
-                    
+                    a1.pathQueue = []; a2.pathQueue = []; a1.targetLatLng = null; a2.targetLatLng = null;
                     window.addHate(a1.faction, a2.faction, 10); window.addHate(a2.faction, a1.faction, 10);
                     
                     [a1, a2].forEach(target => {
@@ -551,7 +583,6 @@ const gameEngine = {
             let max = getMaxTroops(c); if(c.troops < max) c.troops += Math.floor(max * 0.05);
         });
 
-        // 領土摩擦の計算
         Object.values(GameState.castles).forEach(c => {
             if (c.faction === 'independent') return;
             window.graph[c.id].forEach(edge => {
