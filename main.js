@@ -73,7 +73,6 @@ function loadScenarioData(scenarioData) {
     GameState.priceIndex = count > 0 ? (totalKoku / count) / 5000 : 1.0;
     if(GameState.priceIndex < 0.1) GameState.priceIndex = 0.1; 
 
-    // 🌟 初期備蓄の増加（石高の10倍）
     Object.values(GameState.castles).forEach(c => {
         if(c.faction !== "independent") {
             c.gold = Math.floor(1000 * GameState.priceIndex);
@@ -211,7 +210,6 @@ window.updateSurvivalDays = function() {
     document.getElementById('val-food').innerText = food;
     if (troops <= 0) document.getElementById('val-days').innerText = "--";
     else {
-        // 表示上の予測値は通常の「味方領行軍(3.0)」を基準とする
         const daily = (troops / 100) * 3.0 * GameState.priceIndex;
         document.getElementById('val-days').innerText = Math.floor(food / daily);
     }
@@ -246,8 +244,7 @@ window.executeCommand = function(cmd) {
     const castle = GameState.castles[selection.id];
     const nDef = window.rawNodes.find(n => n.id === castle.id);
 
-    // 🌟 攻城中（包囲されている）かの判定
-    const isUnderSiege = GameState.armies.some(a => a.troops > 0 && !areAllies(a.faction, castle.faction) && map.distance(L.latLng(a.pos), L.latLng(nDef.lat, nDef.lng)) < 200);
+    const isUnderSiege = GameState.armies.some(a => a.troops > 0 && !window.areAllies(a.faction, castle.faction) && map.distance(L.latLng(a.pos), L.latLng(nDef.lat, nDef.lng)) < 200);
     if (isUnderSiege) {
         alert("敵軍に包囲されているため、内政や普請は行えません！");
         return;
@@ -374,10 +371,8 @@ function updateRightPanel() {
     } else {
         const c = GameState.castles[selection.id]; if(!c) return;
         const f = FactionMaster[c.faction]; const pIdx = GameState.priceIndex;
-        
-        // 🌟 攻城されているかのチェック
         const nDef = window.rawNodes.find(n => n.id === c.id);
-        const isUnderSiege = GameState.armies.some(a => a.troops > 0 && !areAllies(a.faction, c.faction) && map.distance(L.latLng(a.pos), L.latLng(nDef.lat, nDef.lng)) < 200);
+        const isUnderSiege = GameState.armies.some(a => a.troops > 0 && !window.areAllies(a.faction, c.faction) && map.distance(L.latLng(a.pos), L.latLng(nDef.lat, nDef.lng)) < 200);
 
         let dH = ''; 
         if(c.faction===GameState.playerFaction) {
@@ -394,10 +389,74 @@ function updateRightPanel() {
                 domesticHtml = `<div class="panel-section"><b>内政</b><button class="cmd-btn action-btn" onclick="executeCommand('agriculture')">開墾</button><button class="cmd-btn action-btn" onclick="executeCommand('commerce')">商い</button><button class="cmd-btn action-btn" onclick="executeCommand('conscript')">徴兵</button></div>`;
             }
         }
+        
+        // 🌟 外交パネル（他国の城を選択した場合）
+        let diploHtml = '';
+        if (GameState.playerFaction !== null && c.faction !== "independent" && c.faction !== GameState.playerFaction) {
+            let score = window.getDiplomacyScore(GameState.playerFaction, c.faction);
+            let fVal = GameState.friendshipMatrix[GameState.playerFaction]?.[c.faction] || 0;
+            let hVal = GameState.hateMatrix[GameState.playerFaction]?.[c.faction] || 0;
+            let level = window.getAllianceLevel(GameState.playerFaction, c.faction);
+            let relStr = level === 3 ? '盟友' : level === 2 ? '同盟' : level === 1 ? '和睦' : '敵対/中立';
+            let relColor = level >= 1 ? '#27ae60' : '#e74c3c';
+            
+            diploHtml = `
+            <div class="panel-section">
+                <div style="font-weight:bold; font-size:13px; margin-bottom:5px;">🤝 外交関係 (${relStr})</div>
+                <div style="font-size:11px; margin-bottom:5px;">評価値: <b style="color:${relColor}">${score}</b> (友好 ${fVal} / 遺恨 ${hVal})</div>
+                <div style="display:flex; gap:5px;">
+                    <button class="action-btn" style="background:#2980b9; flex:1; font-size:11px; padding:6px;" onclick="sendGoodwill('${c.faction}')">親善使者 (金100)</button>
+                    ${level > 0 ? `<button class="action-btn" style="background:#c0392b; flex:1; font-size:11px; padding:6px;" onclick="breakAlliance('${c.faction}')">手切れ (破棄)</button>` : ''}
+                </div>
+            </div>`;
+        }
 
-        p.innerHTML = `<div class="panel-section" style="border-top:4px solid ${f.color};"><b>${c.name}</b><div class="data-row"><span>支配:</span> <b>${f.name}</b></div><div class="data-row"><span>蔵の金/糧:</span> <b>${c.gold} / ${c.food}</b></div><div class="data-row"><span>石高/商業:</span> <b>${c.currentKokudaka} / ${c.commerce}</b></div><div class="data-row"><span>城壁/兵力:</span> <b>${Math.ceil(c.siegeHP)} / ${c.troops}</b></div></div>` + (c.faction==='independent'&&GameState.playerFaction===null?`<button class="action-btn" onclick="playAsFaction('${c.faction}')">この大名で開始</button>`:dH) + domesticHtml;
+        p.innerHTML = `<div class="panel-section" style="border-top:4px solid ${f.color};"><b>${c.name}</b><div class="data-row"><span>支配:</span> <b>${f.name}</b></div><div class="data-row"><span>蔵の金/糧:</span> <b>${c.gold} / ${c.food}</b></div><div class="data-row"><span>石高/商業:</span> <b>${c.currentKokudaka} / ${c.commerce}</b></div><div class="data-row"><span>城壁/兵力:</span> <b>${Math.ceil(c.siegeHP)} / ${c.troops}</b></div></div>` + diploHtml + (c.faction==='independent'&&GameState.playerFaction===null?`<button class="action-btn" onclick="playAsFaction('${c.faction}')">この大名で開始</button>`:dH) + domesticHtml;
     }
 }
+
+// 🌟 プレイヤーの能動的な外交工作コマンド
+window.sendGoodwill = function(targetFaction) {
+    if(GameState.playerFaction === null) return;
+    let myCastles = Object.values(GameState.castles).filter(c => c.faction === GameState.playerFaction);
+    let fundCastle = myCastles.find(c => c.gold >= 100);
+    if (!fundCastle) { alert('親善を行うための「金100」を持つ城がありません。'); return; }
+    
+    fundCastle.gold -= 100;
+    window.addFriendship(GameState.playerFaction, targetFaction, 50);
+    window.addFriendship(targetFaction, GameState.playerFaction, 50);
+    gameEngine.log(`【外交】${FactionMaster[targetFaction].name} へ使者を送り、親善を深めました。(友好度上昇)`);
+    
+    let mutualScore = (window.getDiplomacyScore(GameState.playerFaction, targetFaction) + window.getDiplomacyScore(targetFaction, GameState.playerFaction)) / 2;
+    let level = 0;
+    if (mutualScore >= 600) level = 3; else if (mutualScore >= 300) level = 2; else if (mutualScore >= 150) level = 1;
+    if (level > 0) GameState.alliances[`${GameState.playerFaction}-${targetFaction}`] = level;
+
+    updateUI(); drawMap();
+};
+
+// 🌟 手切れ（同盟破棄による世界中からの信用失墜）
+window.breakAlliance = function(targetFaction) {
+    if(!confirm(`${FactionMaster[targetFaction].name} との同盟を破棄しますか？\n信を違えたとして、世界中からの評価が激減します。`)) return;
+    
+    GameState.alliances[`${GameState.playerFaction}-${targetFaction}`] = 0;
+    GameState.alliances[`${targetFaction}-${GameState.playerFaction}`] = 0;
+    
+    window.addHate(GameState.playerFaction, targetFaction, 500);
+    window.addHate(targetFaction, GameState.playerFaction, 1000); 
+    
+    Object.keys(FactionMaster).forEach(f => {
+        if (f !== 'independent' && f !== GameState.playerFaction) {
+            window.addHate(f, GameState.playerFaction, 200); 
+            if(GameState.friendshipMatrix[f]?.[GameState.playerFaction]) {
+                GameState.friendshipMatrix[f][GameState.playerFaction] = 0;
+            }
+        }
+    });
+    
+    gameEngine.log(`<span style="color:#e74c3c; font-weight:bold;">【外交】${FactionMaster[targetFaction].name} との同盟を一方的に破棄しました！諸大名は我が家の不義を警戒しています。</span>`);
+    updateUI(); drawMap();
+};
 
 window.updateDynamicVisuals = function() {
     Object.keys(window.armyMarkers).forEach(id => { if(!GameState.armies.find(a=>a.id===id)) { armyLayer.removeLayer(window.armyMarkers[id]); delete window.armyMarkers[id]; } });
