@@ -1,4 +1,4 @@
-// --- engine.js: 外交工作・呉越同舟・摩擦停止 統合版 ---
+// --- engine.js: 5段階警戒レベル・フリーズ回避・外交統合版 ---
 
 const GameState = {
     isLoaded: false, hasStarted: false, isPaused: true,
@@ -7,7 +7,6 @@ const GameState = {
     priceIndex: 1.0, tasks: [] 
 };
 
-// 🌟 グローバル関数化（main.jsからも呼べるように）
 window.getAllianceLevel = function(f1, f2) {
     if (f1 === f2) return 3;
     return GameState.alliances[`${f1}-${f2}`] || GameState.alliances[`${f2}-${f1}`] || 0;
@@ -62,7 +61,23 @@ const gameEngine = {
         const pIdx = GameState.priceIndex;
         const isWinter = (GameState.month === 12 || GameState.month <= 2);
 
-        // 城の消費
+        // 🌟 フリーズ回避（同盟成立時の攻城軍の強制待機）
+        GameState.armies.forEach(a => {
+            if (a.troops <= 0) return;
+            if (a.targetNodeId && a.task === 'attack') {
+                let targetCastle = GameState.castles[a.targetNodeId];
+                if (targetCastle && window.areAllies(a.faction, targetCastle.faction)) {
+                    a.task = 'hold'; // その場で待機
+                    a.targetNodeId = null;
+                    a.pathQueue = [];
+                    if (a.faction === GameState.playerFaction) {
+                        this.log(`<span style="color:#2980b9;">📢 同盟が成立したため、部隊が ${targetCastle.name} への攻撃を中止し、待機状態に入りました。</span>`);
+                    }
+                }
+            }
+        });
+
+        // 城の兵糧消費
         Object.values(GameState.castles).forEach(c => {
             if(c.faction === 'independent') return;
             c.food -= Math.floor((c.troops / 100) * 0.3 * pIdx);
@@ -101,16 +116,16 @@ const gameEngine = {
                     let cn = window.rawNodes.find(n => n.id === closestAlly.id);
                     let route = window.findShortestPath(getClosestNode(a.pos).id, cn.id);
                     let days = route ? Math.ceil(route.reduce((sum, r) => sum + (r.dist / r.speedMod), 0) / 6.0) : 0;
-                    let reqFood = Math.floor((a.troops / 100) * 3 * pIdx * (days + 5)); 
+                    let reqFood = Math.floor((a.troops / 100) * 3.0 * pIdx * (days + 5)); 
                     if (a.food < reqFood) {
                         a.task = 'retreat'; a.pathQueue = route || []; a.targetNodeId = closestAlly.id; a.targetArmyId = null; a.targetLatLng = null;
-                        if(a.faction === GameState.playerFaction) this.log(`<span style="color:#e74c3c;">⚠️ 兵糧不足！部隊が ${closestAlly.name} へ退却を開始しました！</span>`);
+                        if(a.faction === GameState.playerFaction) this.log(`<span style="color:#e74c3c;">⚠️ 兵糧不足！部隊が ${closestAlly.name} へ退却を開始！</span>`);
                     }
                 }
             }
         });
 
-        // 工期タスク進行
+        // 工期タスク
         for (let i = GameState.tasks.length - 1; i >= 0; i--) {
             let t = GameState.tasks[i]; t.daysLeft--;
             if (t.daysLeft <= 0) {
@@ -348,7 +363,7 @@ const gameEngine = {
             let max = getMaxTroops(c); if(c.troops < max) c.troops += Math.floor(max * 0.05);
         });
 
-        // 🌟 領土摩擦（同盟・和睦を結んでいれば摩擦によるヘイト上昇は停止）
+        // 領土摩擦の計算（同盟・和睦による停止）
         Object.values(GameState.castles).forEach(c => {
             if (c.faction === 'independent') return;
             window.graph[c.id].forEach(edge => {
@@ -363,7 +378,7 @@ const gameEngine = {
 
         const factions = Object.keys(FactionMaster).filter(f => f !== 'independent');
 
-        // 🌟 史実的包囲網システム
+        // 🌟 5段階の警戒レベルと包囲網システム
         let factionKokudaka = {}; let totalKoku = 0;
         Object.values(GameState.castles).forEach(c => {
             if(c.faction !== 'independent') {
@@ -372,54 +387,99 @@ const gameEngine = {
             }
         });
         
-        let avgKoku = totalKoku / (factions.length || 1);
-        let targetFaction = null; let maxKoku = 0;
+        let targetFaction = null; let maxShare = 0; let currentLevel = 0;
         
         factions.forEach(f => {
-            if (factionKokudaka[f] > avgKoku * 2.0 && factionKokudaka[f] > maxKoku) {
-                maxKoku = factionKokudaka[f]; targetFaction = f;
+            let share = factionKokudaka[f] / (totalKoku || 1);
+            let neighborKoku = 0;
+            let neighbors = new Set();
+            
+            // 隣接勢力の石高合計を算出
+            Object.values(GameState.castles).forEach(c => {
+                if (c.faction === f) {
+                    window.graph[c.id].forEach(edge => {
+                        let nc = GameState.castles[edge.to];
+                        if (nc && nc.faction !== 'independent' && nc.faction !== f) neighbors.add(nc.faction);
+                    });
+                }
+            });
+            neighbors.forEach(nf => { neighborKoku += factionKokudaka[nf]; });
+            
+            let neighborRatio = (neighborKoku > 0) ? (factionKokudaka[f] / neighborKoku) : 0;
+            if (neighborKoku === 0 && share < 0.5) neighborRatio = 0;
+
+            let level = 0;
+            if (share > 0.35) level = 5; // 天魔
+            else if (share > 0.25) level = 4; // 包囲
+            else if (share > 0.20 || neighborRatio > 1.2) level = 3; // 防共
+            else if (share > 0.15 || neighborRatio > 1.0) level = 2; // 警戒
+            else if (share > 0.10 || neighborRatio > 0.8) level = 1; // 注視
+
+            if (level > currentLevel || (level === currentLevel && share > maxShare)) {
+                currentLevel = level; targetFaction = f; maxShare = share;
             }
         });
 
-        if (targetFaction) {
+        if (currentLevel >= 1 && targetFaction) {
             let antiFactions = [];
-            let targetCastles = Object.values(GameState.castles).filter(c => c.faction === targetFaction);
-            
             factions.forEach(f => {
                 if (f === targetFaction) return;
                 let isNear = false;
-                let myCastles = Object.values(GameState.castles).filter(c => c.faction === f);
-                for(let mc of myCastles) {
-                    let mN = window.rawNodes.find(n => n.id === mc.id);
-                    for(let tc of targetCastles) {
-                        let tN = window.rawNodes.find(n => n.id === tc.id);
-                        if (map.distance(L.latLng(mN.lat, mN.lng), L.latLng(tN.lat, tN.lng)) < 50000) { 
-                            isNear = true; break;
+                if (currentLevel >= 4) {
+                    isNear = true; // レベル4以上は全国が参加
+                } else {
+                    let myCastles = Object.values(GameState.castles).filter(c => c.faction === f);
+                    let targetCastles = Object.values(GameState.castles).filter(c => c.faction === targetFaction);
+                    for(let mc of myCastles) {
+                        let mN = window.rawNodes.find(n => n.id === mc.id);
+                        for(let tc of targetCastles) {
+                            let tN = window.rawNodes.find(n => n.id === tc.id);
+                            if (map.distance(L.latLng(mN.lat, mN.lng), L.latLng(tN.lat, tN.lng)) < 60000) { isNear = true; break; }
                         }
+                        if(isNear) break;
                     }
-                    if(isNear) break;
                 }
-                if (isNear) {
-                    antiFactions.push(f);
-                    window.addHate(f, targetFaction, 20); 
-                }
+                if (isNear) antiFactions.push(f);
             });
 
-            for(let i=0; i<antiFactions.length; i++) {
-                for(let j=i+1; j<antiFactions.length; j++) {
-                    let f1 = antiFactions[i], f2 = antiFactions[j];
-                    let currentScore = window.getDiplomacyScore(f1, f2);
-                    if (currentScore < 300) { 
-                        window.addFriendship(f1, f2, 10); window.addFriendship(f2, f1, 10);
+            // 警戒レベルに応じたAIの打算的挙動
+            if (currentLevel === 1) {
+                antiFactions.forEach(f => window.addHate(f, targetFaction, 5));
+            } else if (currentLevel === 2) {
+                for(let i=0; i<antiFactions.length; i++) {
+                    for(let j=i+1; j<antiFactions.length; j++) {
+                         window.addFriendship(antiFactions[i], antiFactions[j], 10);
                     }
                 }
+                antiFactions.forEach(f => window.addHate(f, targetFaction, 10));
+            } else if (currentLevel === 3) {
+                for(let i=0; i<antiFactions.length; i++) {
+                    for(let j=i+1; j<antiFactions.length; j++) {
+                         if (window.getDiplomacyScore(antiFactions[i], antiFactions[j]) < 150) {
+                             window.addFriendship(antiFactions[i], antiFactions[j], 30);
+                         }
+                    }
+                }
+                antiFactions.forEach(f => window.addHate(f, targetFaction, 30));
+            } else if (currentLevel >= 4) {
+                for(let i=0; i<antiFactions.length; i++) {
+                    for(let j=i+1; j<antiFactions.length; j++) {
+                         if (window.getDiplomacyScore(antiFactions[i], antiFactions[j]) < 300) {
+                             window.addFriendship(antiFactions[i], antiFactions[j], 50);
+                         }
+                    }
+                }
+                antiFactions.forEach(f => window.addHate(f, targetFaction, (currentLevel === 5 ? 100 : 50)));
             }
-            if (GameState.month === 1 && antiFactions.length > 1) {
-                this.log(`<span style="color:#8e44ad; font-weight:bold;">🚨 諸大名が【${FactionMaster[targetFaction].name} 包囲網】を形成し、警戒を強めています！</span>`);
+
+            if (GameState.month === 1) {
+                let lvlNames = ["", "注視", "警戒", "防共", "包囲", "天魔"];
+                if(currentLevel >= 3) this.log(`<span style="color:#8e44ad; font-weight:bold;">🚨 諸大名が【${FactionMaster[targetFaction].name} 包囲網 (Lv${currentLevel}: ${lvlNames[currentLevel]})】を形成しています！</span>`);
+                else this.log(`<span style="color:#e67e22;">⚠️ 諸大名が ${FactionMaster[targetFaction].name} の拡大を注視しています (警戒Lv${currentLevel})。</span>`);
             }
         }
 
-        // 🌟 呉越同舟（共通の敵を持つ者同士の接近）
+        // 呉越同舟（共通の敵）
         for(let i=0; i<factions.length; i++) {
             for(let j=i+1; j<factions.length; j++) {
                 let f1 = factions[i], f2 = factions[j];
@@ -437,7 +497,7 @@ const gameEngine = {
             }
         }
 
-        // 🌟 AIの能動的な親善工作
+        // AIの能動的親善
         factions.forEach(f => {
             if (f === GameState.playerFaction || f === targetFaction) return;
             let myCastles = Object.values(GameState.castles).filter(c => c.faction === f);
@@ -453,9 +513,8 @@ const gameEngine = {
                     });
                 });
                 neighbors.forEach(nf => {
-                    if (nf === targetFaction) return; // 包囲網の的とは親善しない
+                    if (nf === targetFaction) return;
                     let score = window.getDiplomacyScore(f, nf);
-                    // 敵対していないが、同盟未満の相手に資金を使って親善
                     if (score > -50 && score < 300 && richest.gold >= 150) {
                         richest.gold -= 100;
                         window.addFriendship(f, nf, 40); window.addFriendship(nf, f, 40);
@@ -464,20 +523,19 @@ const gameEngine = {
             }
         });
 
-        // 🌟 外交感情の自然減衰
+        // 感情減衰と外交更新
         for (let f1 in GameState.hateMatrix) { for (let f2 in GameState.hateMatrix[f1]) { GameState.hateMatrix[f1][f2] = Math.max(0, GameState.hateMatrix[f1][f2] - 10); } }
         for (let f1 in GameState.friendshipMatrix) { for (let f2 in GameState.friendshipMatrix[f1]) { GameState.friendshipMatrix[f1][f2] = Math.max(0, GameState.friendshipMatrix[f1][f2] - 5); } }
         
-        // 🌟 閾値（150、300、600）での同盟関係の更新
         GameState.alliances = {};
         for(let i=0; i<factions.length; i++) {
             for(let j=i+1; j<factions.length; j++) {
                 let f1 = factions[i], f2 = factions[j];
                 let mutualScore = (window.getDiplomacyScore(f1, f2) + window.getDiplomacyScore(f2, f1)) / 2;
                 let level = 0;
-                if (mutualScore >= 600) level = 3;       // 盟友
-                else if (mutualScore >= 300) level = 2;  // 同盟
-                else if (mutualScore >= 150) level = 1;  // 和睦
+                if (mutualScore >= 600) level = 3;
+                else if (mutualScore >= 300) level = 2;
+                else if (mutualScore >= 150) level = 1;
                 
                 if (level > 0) GameState.alliances[`${f1}-${f2}`] = level;
             }
