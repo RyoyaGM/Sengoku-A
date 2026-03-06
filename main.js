@@ -1,3 +1,5 @@
+// --- main.js: 不在勢力非表示対応・最新版 ---
+
 window.rawNodes = []; window.rawEdges = []; window.graph = {}; 
 window.armyMarkers = {}; window.castleMarkers = {};
 let selection = { type: null, id: null };
@@ -365,7 +367,6 @@ function updateRightPanel() {
         const a = GameState.armies.find(x => x.id === selection.id); if(!a) return;
         const f = FactionMaster[a.faction]; 
         
-        // 🌟 部隊の状況を細かく判定して表示
         let dN = '待機中';
         if(a.targetArmyId) {
             dN = '軍勢を追尾/迎撃中'; 
@@ -491,26 +492,44 @@ window.updateDynamicVisuals = function() {
     Object.values(GameState.castles).forEach(c => { const m = window.castleMarkers[c.id]; if(m) m.getElement().querySelector('.troop-badge').innerText = c.troops; });
 };
 window.updateSpeedDisplay = function() { document.getElementById('speedDisplay').innerText = (document.getElementById('speedSlider').value/1000).toFixed(2)+"秒"; };
+
+// 🌟 ここが修正された詳細統計（滅亡・不在勢力の非表示化）
 window.toggleStatsModal = function() { document.getElementById('stats-modal').classList.toggle('modal-hidden'); buildStatsTable(); };
+
 function buildStatsTable() {
     let h = `<table class="stats-table"><thead><tr><th>大名</th><th>外交関係</th><th>総資金/糧</th><th>兵力</th></tr></thead><tbody>`;
+    
+    // 🌟 現在マップ上に「城」か「軍隊」を持っている生きている勢力をリストアップ
+    let activeFactions = new Set();
+    Object.values(GameState.castles).forEach(c => { if(c.faction !== 'independent') activeFactions.add(c.faction); });
+    GameState.armies.forEach(a => { if(a.faction !== 'independent') activeFactions.add(a.faction); });
+
     Object.keys(FactionMaster).forEach(fId => {
-        if(fId==='independent') return;
-        const f = FactionMaster[fId]; const g = window.getTotalGold(fId); const l = window.getTotalFood(fId);
-        let troops = 0; Object.values(GameState.castles).forEach(c => { if(c.faction===fId) troops+=c.troops; }); GameState.armies.forEach(a => { if(a.faction===fId) troops+=a.troops; });
+        // 生きていない勢力（滅亡または未登場）はスキップ
+        if (fId === 'independent' || !activeFactions.has(fId)) return;
+        
+        const f = FactionMaster[fId]; 
+        const g = window.getTotalGold(fId); 
+        const l = window.getTotalFood(fId);
+        let troops = 0; 
+        Object.values(GameState.castles).forEach(c => { if(c.faction === fId) troops += c.troops; }); 
+        GameState.armies.forEach(a => { if(a.faction === fId) troops += a.troops; });
         
         let allies = [];
-        Object.keys(FactionMaster).forEach(other => {
-            if(fId !== other) {
+        // 相手も「生きている勢力」の中からのみ外交関係を探す
+        activeFactions.forEach(other => {
+            if (fId !== other) {
                 let level = window.getAllianceLevel(fId, other);
-                if(level === 3) allies.push(`🤝${FactionMaster[other].name}(盟友)`);
-                else if(level === 2) allies.push(`🤝${FactionMaster[other].name}(同盟)`);
-                else if(level === 1) allies.push(`🕊️${FactionMaster[other].name}(和睦)`);
+                if (level === 3) allies.push(`🤝${FactionMaster[other].name}(盟友)`);
+                else if (level === 2) allies.push(`🤝${FactionMaster[other].name}(同盟)`);
+                else if (level === 1) allies.push(`🕊️${FactionMaster[other].name}(和睦)`);
             }
         });
+        
         let allyStr = allies.length > 0 ? allies.join(', ') : "<span style='color:#bdc3c7;'>孤立</span>";
 
-        if(troops>0 || g>0) h += `<tr><td><span class="rank-color" style="background-color:${f.color};"></span><b>${f.name}</b></td><td style="font-size:11px;">${allyStr}</td><td>${g}/${l}</td><td>${troops}</td></tr>`;
+        h += `<tr><td><span class="rank-color" style="background-color:${f.color};"></span><b>${f.name}</b></td><td style="font-size:11px;">${allyStr}</td><td>${g}/${l}</td><td>${troops}</td></tr>`;
     });
+    
     document.getElementById('stats-table-container').innerHTML = h + `</tbody></table>`;
 }
