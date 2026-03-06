@@ -1,4 +1,4 @@
-// --- engine.js: 高度AI ＋ ZOC ＋ すれ抜け防止 ＋ 迎撃・戦術撤退 完全版 ---
+// --- engine.js: 高度AI ＋ ZOC ＋ すれ抜け防止 ＋ 好機察知（ハイエナ）完全版 ---
 
 const GameState = {
     isLoaded: false, hasStarted: false, isPaused: true,
@@ -57,7 +57,7 @@ const gameEngine = {
     },
 
     tickDay: function() {
-        if (GameState.day === 1) this.runAI();
+        this.runAI(); // 毎日の処理で分散AIを呼び出す
         const pIdx = GameState.priceIndex;
         const isWinter = (GameState.month === 12 || GameState.month <= 2);
 
@@ -208,7 +208,6 @@ const gameEngine = {
                 let cn = window.rawNodes.find(n => n.id === closestSelf.id);
                 let route = window.findShortestPath(getClosestNode(a.pos).id, cn.id);
                 
-                // 1. 兵糧不足による撤退
                 let daysToReturn = route ? Math.ceil(route.reduce((sum, r) => sum + (r.dist / r.speedMod), 0) / 6.0) : 0;
                 let reqFood = Math.floor((a.troops / 100) * 3.0 * pIdx * (daysToReturn + 5)); 
                 if (a.food < reqFood) {
@@ -217,9 +216,8 @@ const gameEngine = {
                     if(a.faction === GameState.playerFaction) this.log(`<span style="color:#e74c3c;">⚠️ 兵糧不足の恐れ！部隊が ${closestSelf.name} へ緊急退却を開始！</span>`);
                 }
                 
-                // 🌟 2. 無謀な攻城からの「戦術的撤退」
                 if (a.task === 'attack' && a.targetNodeId && !isStrictAlly && distToNode < 500) {
-                    if (castleAtNode && a.troops < castleAtNode.troops * 0.6) { // 兵力が城の60%未満になったら逃げる
+                    if (castleAtNode && a.troops < castleAtNode.troops * 0.6) {
                         a.task = 'retreat'; a.pathQueue = route || []; a.targetNodeId = closestSelf.id; 
                         a.targetArmyId = null; a.targetLatLng = null;
                         if(a.faction === GameState.playerFaction) this.log(`<span style="color:#e74c3c;">⚠️ 劣勢！部隊が ${castleAtNode.name} の包囲を諦め、退却を開始！</span>`);
@@ -358,7 +356,6 @@ const gameEngine = {
             }
         });
 
-        // トンネリング（すれ抜け）防止
         for (let i = 0; i < GameState.armies.length; i++) {
             for (let j = i + 1; j < GameState.armies.length; j++) {
                 let a1 = GameState.armies[i], a2 = GameState.armies[j];
@@ -393,7 +390,6 @@ const gameEngine = {
             }
         }
 
-        // 合流
         for (let i = 0; i < GameState.armies.length; i++) {
             for (let j = i + 1; j < GameState.armies.length; j++) {
                 let a1 = GameState.armies[i], a2 = GameState.armies[j];
@@ -433,18 +429,15 @@ const gameEngine = {
                     }
                 } else if (!window.areAllies(army.faction, castle.faction)) {
                     army.pathQueue = []; army.targetLatLng = null; army.targetArmyId = null;
-                    army.targetNodeId = castle.id; army.task = 'attack'; // ZOC: 敵城で強制ストップ
+                    army.targetNodeId = castle.id; army.task = 'attack';
                     
-                    // 🌟 1. 城兵の迎撃（打って出る）
                     if (castle.troops > army.troops * 1.2) {
-                        // 城兵が敵軍の1.2倍以上いる場合、城壁に頼らず野戦を挑む
-                        let dmgToArmy = Math.floor(castle.troops * 0.08); // 城側からの強烈なダメージ
+                        let dmgToArmy = Math.floor(castle.troops * 0.08); 
                         let dmgToCastle = Math.floor(army.troops * 0.04);
                         army.troops -= dmgToArmy;
                         castle.troops -= dmgToCastle;
                         if(GameState.day % 5 === 0) window.showFloatingText(node.lat, node.lng, "迎撃", "#3498db");
                     } else {
-                        // 通常の攻城戦
                         if (castle.siegeHP > 0) {
                             let dmg = Math.floor(army.troops * 0.05); castle.siegeHP -= dmg;
                             army.troops -= Math.floor(castle.troops * 0.02);
@@ -502,10 +495,11 @@ const gameEngine = {
     runAI: function() {
         const pIdx = GameState.priceIndex;
 
+        // 1. 援軍要請（毎日20%の確率でSOS）
         Object.values(GameState.castles).forEach(castle => {
             if (castle.faction === 'independent') return;
             let isAttacked = GameState.armies.some(a => a.faction !== castle.faction && a.targetNodeId === castle.id);
-            if (isAttacked) {
+            if (isAttacked && Math.random() < 0.20) {
                 Object.keys(FactionMaster).forEach(allyFac => {
                     let level = window.getAllianceLevel(castle.faction, allyFac);
                     if (level >= 2 && castle.gold >= Math.floor(100 * pIdx) && Math.random() < (level === 3 ? 0.9 : 0.5)) {
@@ -531,6 +525,7 @@ const gameEngine = {
             }
         });
 
+        // 2. ターゲット選定と出陣
         Object.values(GameState.castles).forEach(c => {
             if(c.faction === 'independent' || (GameState.playerFaction && c.faction === GameState.playerFaction)) return;
             
@@ -549,6 +544,17 @@ const gameEngine = {
                 .sort((a, b) => a.dist - b.dist)
                 .slice(0, 5);
 
+            // 🌟 絶好の機会（好機察知・空き巣）判定
+            // 近く(20km以内)に、自軍の出陣兵力の30%未満の戦力しかない敵城があるかを毎日チェック
+            let hasChance = candidates.some(cand => {
+                let enemyPower = cand.castle.troops + (cand.castle.siegeHP * 0.5);
+                return cand.dist < 20000 && enemyPower < (deployTroops * 0.3);
+            });
+
+            // 弱った城があれば60%の確率で即応、無ければ5%の確率で気まぐれに検討
+            let launchProb = hasChance ? 0.60 : 0.05;
+            if (Math.random() >= launchProb) return;
+
             let bestTarget = null; let bestScore = -Infinity; let bestFoodReq = 0;
             candidates.forEach(cand => {
                 let targetCastle = cand.castle;
@@ -565,7 +571,11 @@ const gameEngine = {
                 if (deployTroops < enemyPower * 1.2 && targetCastle.faction !== 'independent') return;
 
                 let hateBonus = (GameState.hateMatrix[c.faction]?.[targetCastle.faction] || 0) * 10;
-                let score = (10000 / (cand.dist + 1)) - enemyPower + hateBonus;
+                
+                // 🌟 ガラ空きの城には「+10000」のスコアボーナスを与えて最優先で狙わせる
+                let chanceBonus = (enemyPower < deployTroops * 0.3 && cand.dist < 20000) ? 10000 : 0;
+                
+                let score = (10000 / (cand.dist + 1)) - enemyPower + hateBonus + chanceBonus;
                 
                 if (score > bestScore) { bestScore = score; bestTarget = { id: targetCastle.id, route: route }; bestFoodReq = estFood; }
             });
@@ -574,7 +584,15 @@ const gameEngine = {
                 let a = window.deployArmy(c.id, deployTroops, true, 'attack', 0, bestFoodReq);
                 if (a) {
                     a.pathQueue = bestTarget.route; a.targetNodeId = bestTarget.id;
-                    this.log(`<span class="log-ai">【出陣】${FactionMaster[c.faction].name} が ${GameState.castles[bestTarget.id].name} へ侵攻開始！</span>`);
+                    let targetCastle = GameState.castles[bestTarget.id];
+                    let targetPower = targetCastle.troops + (targetCastle.siegeHP * 0.5);
+                    
+                    // ハイエナ攻撃の場合は専用の赤いログを出す
+                    if (targetPower < deployTroops * 0.3) {
+                        this.log(`<span style="color:#e74c3c; font-weight:bold;">【急襲】${FactionMaster[c.faction].name} が手薄となった ${targetCastle.name} へ好機と見て侵攻開始！</span>`);
+                    } else {
+                        this.log(`<span class="log-ai">【出陣】${FactionMaster[c.faction].name} が ${targetCastle.name} へ侵攻開始！</span>`);
+                    }
                 }
             }
         });
